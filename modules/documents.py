@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import time
 import uuid
+import os
+import threading
+import re
+from contextlib import contextmanager
+from functools import wraps
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
@@ -19,6 +24,66 @@ SYSTEM_FOLDERS = [
 ]
 
 
+
+# Serialize each owner's entire read/modify/write transaction. Atomic file
+# replacement alone cannot prevent lost updates from concurrent requests.
+_owner_locks_guard = threading.Lock()
+_owner_locks: dict[str, threading.RLock] = {}
+_owner_lock_depth = threading.local()
+
+
+@contextmanager
+def _owner_transaction(data_dir: Path, user_id: str):
+    state_path = _state_path(data_dir, user_id)
+    key = str(state_path.resolve())
+    with _owner_locks_guard:
+        lock = _owner_locks.setdefault(key, threading.RLock())
+    with lock:
+        depths = getattr(_owner_lock_depth, "depths", None)
+        if depths is None:
+            depths = {}
+            _owner_lock_depth.depths = depths
+        if depths.get(key, 0):
+            depths[key] += 1
+            try:
+                yield
+            finally:
+                depths[key] -= 1
+            return
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        # A stable lock file survives atomic replacement of the JSON state.
+        with open(str(state_path) + ".lock", "a+b") as handle:
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0)
+                if not handle.read(1):
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            depths[key] = 1
+            try:
+                yield
+            finally:
+                depths.pop(key, None)
+                if os.name == "nt":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _serialized(fn):
+    @wraps(fn)
+    def wrapped(data_dir, user_id, *args, **kwargs):
+        with _owner_transaction(data_dir, user_id):
+            return fn(data_dir, user_id, *args, **kwargs)
+    return wrapped
+
+
 def _now() -> float:
     return time.time()
 
@@ -32,6 +97,22 @@ def _msg_id() -> str:
 
 
 def _state_path(data_dir: Path, user_id: str) -> Path:
+    # User identities are supplied by the session layer, but storage must not
+    # permit them to escape the document directory if an upstream contract
+    # changes. Keep existing safe filenames stable for backward compatibility.
+    if not isinstance(user_id, str) or not user_id or user_id in {".", ".."} or any(
+        ch in user_id for ch in ("/", "\\", "\x00")
+    ):
+        raise ValueError("invalid document owner identity")
+    # Windows forbids these characters in filenames; trailing dots/spaces and
+    # reserved device names also alias or invalidate otherwise distinct owners.
+    if any(ch in user_id for ch in '<>:"|?*') or any(ord(ch) < 32 for ch in user_id):
+        raise ValueError("invalid document owner identity")
+    if user_id.rstrip(" .") != user_id or user_id.split(".", 1)[0].upper() in {
+        "CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }:
+        raise ValueError("invalid document owner identity")
     return Path(data_dir) / "documents" / f"{user_id}.json"
 
 
@@ -95,6 +176,7 @@ def _seed_state(user_id: str) -> Dict[str, Any]:
     }
 
 
+@_serialized
 def load_state(data_dir: Path, user_id: str) -> Dict[str, Any]:
     path = _state_path(data_dir, user_id)
     if not path.exists():
@@ -103,11 +185,24 @@ def load_state(data_dir: Path, user_id: str) -> Dict[str, Any]:
         return state
 
     state = read_json(path)
-    if not state:
-        state = _seed_state(user_id)
-        write_json(path, state)
-        return state
+    if not isinstance(state, dict) or not state:
+        # Existing state must never be silently replaced with welcome data.
+        raise ValueError(f"document state is empty or invalid: {path}")
 
+    # Validate persisted collections before touching them. A truncated or
+    # structurally damaged state must not be silently 'repaired' into data loss.
+    for field in ("folders", "documents", "messages"):
+        if field in state and (
+            not isinstance(state[field], list)
+            or any(not isinstance(item, dict) for item in state[field])
+        ):
+            raise ValueError(f"invalid document state collection: {field}")
+    if "provider" in state and not isinstance(state["provider"], dict):
+        raise ValueError("invalid document provider state")
+    if "folders" in state and any(
+        not isinstance(folder.get("folder_id"), str) for folder in state["folders"]
+    ):
+        raise ValueError("invalid document folder identity")
     changed = False
     state.setdefault("version", 1)
     state.setdefault("folders", deepcopy(SYSTEM_FOLDERS))
@@ -134,12 +229,14 @@ def load_state(data_dir: Path, user_id: str) -> Dict[str, Any]:
     return state
 
 
+@_serialized
 def save_state(data_dir: Path, user_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
     path = _state_path(data_dir, user_id)
     write_json(path, state)
     return state
 
 
+@_serialized
 def create_folder(data_dir: Path, user_id: str, name: str, kind: str = "document") -> Dict[str, Any]:
     state = load_state(data_dir, user_id)
     folder = {
@@ -153,12 +250,14 @@ def create_folder(data_dir: Path, user_id: str, name: str, kind: str = "document
     return folder
 
 
+@_serialized
 def list_documents(data_dir: Path, user_id: str) -> List[Dict[str, Any]]:
     state = load_state(data_dir, user_id)
     docs = state.get("documents", [])
     return sorted(docs, key=lambda item: item.get("updated_at", 0), reverse=True)
 
 
+@_serialized
 def get_document(data_dir: Path, user_id: str, doc_id: str) -> Dict[str, Any]:
     state = load_state(data_dir, user_id)
     for doc in state.get("documents", []):
@@ -167,6 +266,7 @@ def get_document(data_dir: Path, user_id: str, doc_id: str) -> Dict[str, Any]:
     raise KeyError(doc_id)
 
 
+@_serialized
 def upsert_document(data_dir: Path, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     state = load_state(data_dir, user_id)
     docs = state["documents"]
@@ -203,6 +303,7 @@ def upsert_document(data_dir: Path, user_id: str, payload: Dict[str, Any]) -> Di
     return doc
 
 
+@_serialized
 def import_document(data_dir: Path, user_id: str, filename: str, content: str) -> Dict[str, Any]:
     title = Path(filename).stem or "Imported Document"
     return upsert_document(
@@ -218,6 +319,7 @@ def import_document(data_dir: Path, user_id: str, filename: str, content: str) -
     )
 
 
+@_serialized
 def export_document(data_dir: Path, user_id: str, doc_id: str) -> Dict[str, Any]:
     doc = get_document(data_dir, user_id, doc_id)
     safe_title = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in doc["title"]).strip("_") or "document"
@@ -228,12 +330,14 @@ def export_document(data_dir: Path, user_id: str, doc_id: str) -> Dict[str, Any]
     }
 
 
+@_serialized
 def list_messages(data_dir: Path, user_id: str) -> List[Dict[str, Any]]:
     state = load_state(data_dir, user_id)
     msgs = state.get("messages", [])
     return sorted(msgs, key=lambda item: item.get("created_at", 0), reverse=True)
 
 
+@_serialized
 def send_message(data_dir: Path, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     state = load_state(data_dir, user_id)
     now = _now()

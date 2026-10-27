@@ -6,6 +6,8 @@ verification succeeds. A failed export therefore never masquerades as a complete
 from __future__ import annotations
 
 import json
+import hashlib
+import errno
 import os
 import shutil
 import tempfile
@@ -44,28 +46,81 @@ class PackageService:
         return datetime.now().astimezone().strftime("%m-%d-%Y_%H-%M-%S")
 
     @staticmethod
-    def _publish_tree(staged: Path, final: Path) -> None:
-        """Publish a verified directory with one same-filesystem rename."""
+    def _publish_tree(staged: Path, final: Path) -> Path:
+        """Publish a staged nonempty directory without replacing an existing export.
+
+        Every package includes a manifest, so an existing destination is never
+        empty in our normal publishing flow. On concurrent attempts, a POSIX
+        rename into an existing nonempty directory fails rather than replacing
+        its contents. Retry with a unique suffix and return the actual path.
+        """
         final.parent.mkdir(parents=True, exist_ok=True)
         pending = final.parent / f".{final.name}.pending-{uuid.uuid4().hex}"
         try:
             shutil.copytree(staged, pending)
-            os.rename(pending, final)
-        except Exception:
+            for number in range(1, 10001):
+                candidate = final if number == 1 else final.with_name(f"{final.name}_{number}")
+                if candidate.exists():
+                    continue
+                try:
+                    os.rename(pending, candidate)
+                    return candidate
+                except OSError as exc:
+                    # POSIX returns ENOTEMPTY for a nonempty existing folder;
+                    # Windows commonly reports EEXIST. Both mean retry, never
+                    # replace another published export.
+                    if exc.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                        raise
+                    continue
+            raise FileExistsError(f"unable to publish collision-free export near {final}")
+        finally:
             shutil.rmtree(pending, ignore_errors=True)
-            raise
 
     @staticmethod
-    def _publish_file(staged: Path, final: Path) -> None:
-        """Publish a verified file without exposing a partially copied final path."""
+    def _publish_file(staged: Path, final: Path) -> Path:
+        """Publish an export atomically without clobbering concurrent exports.
+
+        A link inside the destination filesystem is atomic and fails with
+        FileExistsError rather than replacing an already-published file. This
+        keeps the final name invisible until the complete verified payload is
+        available. Hard links are supported on the target Linux/NTFS filesystems.
+        """
         final.parent.mkdir(parents=True, exist_ok=True)
         pending = final.parent / f".{final.name}.pending-{uuid.uuid4().hex}"
         try:
             shutil.copy2(staged, pending)
-            os.rename(pending, final)
-        except Exception:
+            for number in range(1, 10001):
+                candidate = final if number == 1 else final.with_name(f"{final.stem}_{number}{final.suffix}")
+                try:
+                    os.link(pending, candidate)
+                    return candidate
+                except FileExistsError:
+                    continue
+                except OSError as exc:
+                    # Some removable or phone filesystems cannot create hard
+                    # links. Reserve the destination with an exclusive folder
+                    # before same-filesystem rename. All PubCast publishers
+                    # respect this reservation; neither sees a partial file.
+                    if exc.errno not in (
+                        errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS,
+                        errno.EPERM, errno.EXDEV, errno.EACCES,
+                    ):
+                        raise
+                    reservation = candidate.with_name(f".{candidate.name}.publish-lock")
+                    try:
+                        reservation.mkdir()
+                    except FileExistsError:
+                        continue
+                    try:
+                        if candidate.exists():
+                            continue
+                        os.rename(pending, candidate)
+                        return candidate
+                    finally:
+                        reservation.rmdir()
+            raise FileExistsError(f"unable to publish collision-free export near {final}")
+        finally:
             pending.unlink(missing_ok=True)
-            raise
 
     @staticmethod
     def _write_json(path: Path, value: Any) -> None:
@@ -142,7 +197,7 @@ class PackageService:
             staged = Path(temp) / "package"
             staged.mkdir()
             manifest = self._materialize_conversation(conversation_id, staged)
-            self._publish_tree(staged, final)
+            final = self._publish_tree(staged, final)
         return {
             "root": final,
             "manifest": final / "manifest.json",
@@ -165,7 +220,7 @@ class PackageService:
             staged_zip = Path(temp) / "package.zip"
             self._write_zip(stage_root, staged_zip)
             self._verify_zip(staged_zip)
-            self._publish_file(staged_zip, final)
+            final = self._publish_file(staged_zip, final)
         self._verify_zip(final)
         return {"zip": final, "sha256": sha256_file(final), "members": self._zip_names(final), "verified": True}
 
@@ -189,7 +244,17 @@ class PackageService:
                 if conversation.get("metadata", {}).get("owner") != owner_id:
                     raise PermissionError(f"conversation is not owned by exporter: {conversation_id}")
                 safe_title = self.archive._safe_stem(conversation["title"])
-                folder_name = f"{index:04d}_{safe_title}_{conversation_id}"
+                # External conversation IDs may be longer than a filename or
+                # contain separators. Never use a raw ID as a directory name.
+                # Retain normal short IDs for existing export compatibility;
+                # preserve uniqueness for normalized/truncated IDs by digest.
+                safe_id = self.archive._safe_stem(conversation_id)
+                if safe_id != conversation_id or len(safe_id) > 64:
+                    fingerprint = hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()[:16]
+                    safe_id = f"{safe_id[:48]}_{fingerprint}"
+                prefix = f"{index:04d}_"
+                max_title_length = max(1, 220 - len(prefix) - len(safe_id) - 1)
+                folder_name = f"{prefix}{safe_title[:max_title_length]}_{safe_id}"
                 conversation_root = chats / folder_name
                 conversation_root.mkdir()
                 child_manifest = self._materialize_conversation(conversation_id, conversation_root)
@@ -233,7 +298,7 @@ class PackageService:
                 "".join(f"{item['sha256']}  {item['path']}\n" for item in verified), encoding="utf-8"
             )
             self._verify_inventory(staged, verified)
-            self._publish_tree(staged, final)
+            final = self._publish_tree(staged, final)
 
         return {
             "root": final,
@@ -257,7 +322,7 @@ class PackageService:
             staged_zip = Path(temp) / "library.zip"
             self._write_zip(raw["root"], staged_zip)
             self._verify_zip(staged_zip)
-            self._publish_file(staged_zip, final)
+            final = self._publish_file(staged_zip, final)
         self._verify_zip(final)
         return {"zip": final, "sha256": sha256_file(final), "members": self._zip_names(final), "verified": True}
 

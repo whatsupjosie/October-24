@@ -6,6 +6,7 @@ This service deliberately does not own 2i manuscript state or model memory.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import json
 import re
 import sqlite3
@@ -44,12 +45,23 @@ class ConversationArchive:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        """Open one transaction-scoped connection and always close its handle.
+
+        sqlite3.Connection.__exit__ commits/rolls back but does not close the
+        connection. Python 3.13 reports that old pattern as a ResourceWarning;
+        long-running PubCast servers would accumulate open DB handles until GC.
+        """
         connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA journal_mode=WAL")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _init_db(self) -> None:
         with self._connect() as db:
@@ -296,9 +308,23 @@ class ConversationArchive:
         conversation = self.get_conversation(conversation_id)
         destination = Path(destination)
         destination.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().astimezone().strftime("%m-%d-%Y_%H-%M-%S")
+        stamp = datetime.now().astimezone().strftime("%m-%d-%Y_%H-%M-%S_%f") + "_" + uuid.uuid4().hex[:8]
         kind = "BuildDiscussion" if conversation.get("discussion_type") == "build" else "Chat"
-        stem = f"PubCast_{kind}_{self._safe_stem(conversation['title'])}_{self._safe_stem(conversation_id)}_{stamp}"
+        title_stem = self._safe_stem(conversation["title"])
+        id_stem = self._safe_stem(conversation_id)
+        prefix = f"PubCast_{kind}_"
+        stem = f"{prefix}{title_stem}_{id_stem}_{stamp}"
+        # Each export creates five files, and some filesystems reject a single
+        # filename component longer than 255 bytes. Keep room for the longest
+        # extension and a portability margin while preserving legacy names for
+        # ordinary conversations. Use a digest when shortening a long ID so
+        # distinct IDs that share a prefix do not become indistinguishable.
+        if len(stem) + len(".jsonl") > 240:
+            id_digest = hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()[:16]
+            id_stem = f"{id_stem[:48]}_{id_digest}"
+            title_budget = max(1, 240 - len(".jsonl") - len(prefix) - len(id_stem) - len(stamp) - 2)
+            title_stem = title_stem[:title_budget]
+            stem = f"{prefix}{title_stem}_{id_stem}_{stamp}"
         messages = conversation["messages"]
         plain = "\n\n".join(f"{m['speaker']}:\n{m['exact_text']}" for m in messages) + ("\n" if messages else "")
         markdown = "\n\n".join(f"## {m['speaker']}\n\n{m['exact_text']}" for m in messages) + ("\n" if messages else "")
