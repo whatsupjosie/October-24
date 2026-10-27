@@ -2161,7 +2161,7 @@ document.getElementById('roomLabel').textContent = 'ROOM: ' + ROOM.toUpperCase()
 
 function connectWS() {
   try {
-    ws = new WebSocket(window.ReachAuth.websocketURL(`/ws/${ROOM}`));
+    ws = new WebSocket(window.ReachAuth.websocketURL(`/ws/room/${encodeURIComponent(ROOM)}`));
     ws.onmessage = e => {
       try {
         const msg = JSON.parse(e.data);

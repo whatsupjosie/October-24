@@ -16,7 +16,9 @@
   async function fetchCameras() {
     try {
       const r = await fetch('/api/cameras');
-      cameras = await r.json();
+      const data = await r.json();
+      // The route returns {cameras: [...], program, preview}; keep the list.
+      cameras = Array.isArray(data) ? data : (Array.isArray(data.cameras) ? data.cameras : []);
     } catch (e) { /* silent */ }
   }
 

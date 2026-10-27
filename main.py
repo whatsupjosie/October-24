@@ -890,11 +890,16 @@ async def lifespan(application: FastAPI):
             logger.info("[18] Studio Control ready — reused existing owner")
         if evo_orchestrator is not None:
             await evo_orchestrator.start(evo_orchestrator._engine_node, evo_orchestrator._camera_manager)
+        rearmed_camera_broadcast = getattr(application.state, "camera_broadcast", None)
+        if rearmed_camera_broadcast is not None:
+            rearmed_camera_broadcast.start()
         application.state._pubcast_lifespan_users = 1
         try:
             yield
         finally:
             application.state._pubcast_lifespan_users = 0
+            if rearmed_camera_broadcast is not None:
+                await rearmed_camera_broadcast.stop()
             if evo_orchestrator is not None:
                 await evo_orchestrator.stop()
             if rearmed_conductor is not None:
@@ -1148,6 +1153,11 @@ async def lifespan(application: FastAPI):
     application.state.director_engine = director_engine
     application.state.switcher_service = switcher_service
     application.include_router(create_switcher_router(switcher_service))
+    # Every program/preview change, from any route, reaches the stage pages.
+    from modules.camera_broadcast import CameraBroadcastBridge
+    camera_broadcast = CameraBroadcastBridge(cameras, hub)
+    camera_broadcast.start()
+    application.state.camera_broadcast = camera_broadcast
 
     from modules.pubworld_stage.manifest_store import ManifestStore
     from modules.pubworld_stage.stage_service import StageService
@@ -1853,6 +1863,9 @@ async def lifespan(application: FastAPI):
 
     # — Shutdown —
     logger.info("— PubCast AI shutting down —")
+    _camera_broadcast = getattr(application.state, "camera_broadcast", None)
+    if _camera_broadcast is not None:
+        await _camera_broadcast.stop()
     # Stop only processes started through this authenticated host boundary.
     _stop_shells = getattr(application.state, "foresight_stop_sessions", None)
     if callable(_stop_shells):
@@ -4338,7 +4351,7 @@ async def set_program_camera(source_id: str, identity: Dict[str, Any] = Depends(
     ok = cameras.set_program_source(source_id)
     if not ok:
         raise HTTPException(404, f"Camera not found: {source_id}")
-    if hub:
+    if hub and not getattr(hub, "camera_events_bridged", False):
         await hub.broadcast_system_event({
             "type": "camera_switch",
             "payload": {"target": "program", "source_id": source_id}
@@ -4368,7 +4381,7 @@ async def set_preview_camera(source_id: str, identity: Dict[str, Any] = Depends(
     ok = cameras.set_preview_source(source_id)
     if not ok:
         raise HTTPException(404, f"Camera not found: {source_id}")
-    if hub:
+    if hub and not getattr(hub, "camera_events_bridged", False):
         await hub.broadcast_system_event({
             "type": "camera_switch",
             "payload": {"target": "preview", "source_id": source_id}
@@ -4646,6 +4659,14 @@ async def studio_control_ws_alias(ws: WebSocket):
 @app.websocket("/ws/unity")
 async def unity_ws_alias(ws: WebSocket):
     await unity_ws(ws, "default")
+
+
+# Rooms named like a dedicated protocol (studio, control, unity) cannot be reached
+# through /ws/{room}: those paths belong to the studio desk, control room and Unity
+# bridge. Stage and avatar pages use this unambiguous path for their Hub room.
+@app.websocket("/ws/room/{room}")
+async def websocket_named_room(ws: WebSocket, room: str):
+    await websocket_room(ws, room)
 
 
 @app.websocket("/ws/{room}")

@@ -117,7 +117,7 @@ let otherAvatars = {};     // id → {position, rotation} from WebSocket frames
 function connect() {
   const room  = document.getElementById('room-input').value || 'studio';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  socket = new WebSocket(window.ReachAuth.websocketURL(`/ws/${room}`));
+  socket = new WebSocket(window.ReachAuth.websocketURL(`/ws/room/${encodeURIComponent(room)}`));
   socket.onopen  = () => setStatus('connected');
   socket.onclose = () => { setStatus('reconnecting…'); setTimeout(connect, 2000); };
   socket.onmessage = ev => {

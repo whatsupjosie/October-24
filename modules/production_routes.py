@@ -280,7 +280,7 @@ def create_production_router(
 
         _blackbox_event("broadcast.program_frame", source="recorder", actor=str(identity.get("user_id") or "director"), data={"camera_action": "switch", "target": target, "source_id": source_id})
 
-        if hub:
+        if hub and not getattr(hub, "camera_events_bridged", False):
             pgm = cameras.get_program_source()
             pvw = cameras.get_preview_source()
             await hub.broadcast_system_event({

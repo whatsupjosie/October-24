@@ -26,8 +26,9 @@ SHOTS = os.environ.get("AVATAR_IMPORT_SHOTS")  # optional folder for screenshots
 
 CASES = [
     # files, height preset option value or ("custom", inches), expect skinned, min clips, label
-    (["mh_male.glb"], 68, True, 1, "glb_male_as_pete"),
-    (["mh_female.glb"], 70, True, 1, "glb_female_as_repete"),
+    # Cast: Pete is the woman (5'8"), RePete the young man (5'10"), Sir Purfluous the older man (6'2").
+    (["mh_female.glb"], 68, True, 1, "glb_female_as_pete"),
+    (["mh_male.glb"], 70, True, 1, "glb_male_as_repete"),
     (["mh_male.fbx"], 74, True, 1, "fbx_male_metres_as_purfluous"),
     (["mh_female.fbx"], ("custom", 64), True, 1, "fbx_female_centimetres_x100"),
     (["mh_male.obj", "mh_male.mtl"], 68, False, 0, "obj_male_y_up"),
