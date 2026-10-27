@@ -11,3 +11,4 @@ rust_crate/target/
 .testdata/
 .test-results.tsv
 node_modules/
+data/avatars/imported/

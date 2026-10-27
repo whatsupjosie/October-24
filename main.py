@@ -746,6 +746,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         ("/api/foresight/files/", 44 * 1024 * 1024),
         ("/api/writers-room/documents/", 3 * 1024 * 1024),  # 2i documents may be up to 2 MB of JSON
         ("/api/media/intake", 256 * 1024 * 1024),
+        ("/api/avatars/imports", 210 * 1024 * 1024),  # avatar GLBs; the route caps the file at 200 MB
     )
 
     @classmethod
@@ -1951,6 +1952,12 @@ app.include_router(create_file_format_router())
 app.include_router(create_workspace_router(DATA_DIR))
 _foresight_host_tools = create_host_tools_router(DATA_DIR)
 app.include_router(_foresight_host_tools)
+
+# Imported avatars: any GLB/glTF/OBJ/FBX, converted in the browser, stored as a
+# canonical-height GLB. The server re-measures every upload (modules/avatar_imports.py).
+from modules.avatar_imports import create_avatar_import_router  # noqa: E402
+_avatar_imports = create_avatar_import_router(DATA_DIR)
+app.include_router(_avatar_imports)
 app.state.foresight_stop_sessions = _foresight_host_tools.stop_owned_sessions
 
 
@@ -2695,6 +2702,9 @@ async def page_recovery_console(request: Request): return _page("safe_console.ht
 @app.get("/director-switcher", include_in_schema=False)
 async def page_director_switcher(request: Request): return _page("director_switcher.html", request)
 
+@app.get("/avatar-import", include_in_schema=False)
+async def page_avatar_import(request: Request): return _page("avatar_import.html", request)
+
 @app.get("/avatar-walk-test", include_in_schema=False)
 async def page_avatar_walk_test(request: Request): return _page("avatar_walk_test.html", request)
 
@@ -2703,7 +2713,15 @@ async def avatar_manifest_file():
     manifest_path = DATA_DIR / "avatars" / "manifest.json"
     if not manifest_path.exists():
         raise HTTPException(404, "Avatar manifest not found")
-    return FileResponse(manifest_path, media_type="application/json")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return FileResponse(manifest_path, media_type="application/json")
+    # Imported avatars appear as one more pack; the curated file is never rewritten.
+    imported = _avatar_imports.store.manifest_pack()
+    if imported["assets"]:
+        manifest["packs"] = [p for p in manifest.get("packs", []) if p.get("pack_id") != "imported"] + [imported]
+    return JSONResponse(manifest)
 
 @app.get("/dressing",        include_in_schema=False)
 async def page_dressing(request: Request):       return _page("dressing.html", request)
