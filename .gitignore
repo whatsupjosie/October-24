@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/*.db
+data/emergency_saves/emergency_*/
+data/blackbox/*.bbx
+data/secure/
+rust_crate/target/
+.testdata/
+.test-results.tsv
+node_modules/
