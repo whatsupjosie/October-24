@@ -526,23 +526,34 @@ class CameraSource:
                 logger.error("Capture error for camera %s: %s", self.id, exc)
         finally:
             proc = self.capture_process
-            self.capture_process = None
-            if proc is not None:
-                try:
-                    if proc.poll() is None:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait(timeout=2)
-                finally:
-                    # The capture worker owns these streams. Reap first, then
-                    # release both pipes even if ffmpeg already exited itself.
-                    for stream in (proc.stdout, proc.stderr, proc.stdin):
-                        if stream is not None:
-                            stream.close()
-            self.is_capturing = False
+            try:
+                if proc is not None:
+                    try:
+                        if proc.poll() is None:
+                            try:
+                                proc.terminate()
+                            except ProcessLookupError:
+                                pass
+                            try:
+                                proc.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                try:
+                                    proc.kill()
+                                except ProcessLookupError:
+                                    pass
+                                proc.wait(timeout=2)
+                    finally:
+                        # One failed close must not skip the remaining pipes.
+                        for stream in (proc.stdout, proc.stderr, proc.stdin):
+                            if stream is not None:
+                                try:
+                                    stream.close()
+                                except Exception:
+                                    logger.warning("Camera %s pipe close failed", self.id, exc_info=True)
+            finally:
+                # Retain ownership until process/pipe cleanup has completed.
+                self.capture_process = None
+                self.is_capturing = False
 
     async def stop_capture(self, timeout: float = 3.0):
         """Wait for the worker to reap ffmpeg and close its pipes before returning.

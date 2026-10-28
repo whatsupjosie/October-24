@@ -52,7 +52,10 @@ def create_switcher_router(service:SwitcherService)->APIRouter:
         return service.state()
     @r.post("/ptz/{camera_id}")
     async def ptz(camera_id:str,body:Dict[str,Any]):
-        ok=service.cameras.update_pose(camera_id,position=body.get("position"),rotation=body.get("rotation"),fov=body.get("fov"))
+        try:
+            ok=service.cameras.update_pose(camera_id,position=body.get("position"),rotation=body.get("rotation"),fov=body.get("fov"))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
         if not ok: raise HTTPException(404,"camera not found")
         return service.state()
     @r.get("/scenes")

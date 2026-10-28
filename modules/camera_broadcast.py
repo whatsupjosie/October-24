@@ -28,6 +28,7 @@ class CameraBroadcastBridge:
         self._token: Optional[int] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._generation = 0
+        self._send_lock = asyncio.Lock()
         self._tasks: Set[asyncio.Task] = set()
         self._seen_event_ids: "OrderedDict[str, None]" = OrderedDict()
         self.max_event_cache = 1000
@@ -46,6 +47,7 @@ class CameraBroadcastBridge:
         self._tasks.clear()
         self._generation += 1
         self._loop = asyncio.get_running_loop()
+        self._send_lock = asyncio.Lock()
         generation = self._generation
         self._token = self.cameras.subscribe(
             lambda event: self._on_event(event, generation=generation)
@@ -148,8 +150,12 @@ class CameraBroadcastBridge:
         try:
             if self.hub is None or not hasattr(self.hub, "broadcast_system_event"):
                 return
-            await self.hub.broadcast_system_event(message)
-            self.sent += 1
+            # A slow first cut must finish before a newer cut reaches clients.
+            # asyncio locks serve waiters in acquisition order; shutdown still
+            # owns and cancels both the sender and the queued waiters.
+            async with self._send_lock:
+                await self.hub.broadcast_system_event(message)
+                self.sent += 1
         except Exception:
             logger.exception("camera_switch broadcast failed for %s", message["payload"].get("source_id"))
 

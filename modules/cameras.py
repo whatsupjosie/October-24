@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Union
@@ -131,9 +132,12 @@ class CameraManager:
 
         if previous_program == source_id:
             self._program_source = None
-            self._emit(CameraSwitchEvent("program", None, source_id, time.time()))
         if previous_preview == source_id:
             self._preview_source = None
+        # Commit both references before listeners can observe the removal.
+        if previous_program == source_id:
+            self._emit(CameraSwitchEvent("program", None, source_id, time.time()))
+        if previous_preview == source_id:
             self._emit(CameraSwitchEvent("preview", None, source_id, time.time()))
 
         return True
@@ -201,33 +205,42 @@ class CameraManager:
         return True
 
     def update_pose(self, source_id: str, *, position=None, rotation=None, fov=None) -> bool:
+        """Validate the whole edit before committing any part of the pose."""
         source = self._sources.get(source_id)
         if source is None:
             return False
-        changed = False
-        if position is not None:
-            pos = [float(v) for v in position]
-            if len(pos) != 3:
-                raise ValueError("position must contain x,y,z")
-            if pos != source.position:
-                source.position = pos
-                changed = True
-        if rotation is not None:
-            rot = [float(v) for v in rotation]
-            if len(rot) != 3:
-                raise ValueError("rotation must contain x,y,z")
-            if rot != source.rotation:
-                source.rotation = rot
-                changed = True
+
+        def vector(value, name, current):
+            if value is None:
+                return list(current)
+            if (not isinstance(value, (list, tuple)) or len(value) != 3
+                    or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                           for v in value)):
+                raise ValueError(f"{name} must contain three finite numbers (x,y,z)")
+            try:
+                result = [float(v) for v in value]
+            except (OverflowError, ValueError):
+                raise ValueError(f"{name} must contain three finite numbers (x,y,z)") from None
+            if not all(math.isfinite(v) for v in result):
+                raise ValueError(f"{name} must contain three finite numbers (x,y,z)")
+            return result
+
+        pos = vector(position, "position", source.position)
+        rot = vector(rotation, "rotation", source.rotation)
+        new_fov = source.fov
         if fov is not None:
-            new_fov = float(fov)
+            try:
+                if isinstance(fov, bool):
+                    raise ValueError
+                new_fov = float(fov)
+            except (TypeError, ValueError, OverflowError):
+                raise ValueError("fov must be between 1 and 179 degrees") from None
             if not 1.0 <= new_fov <= 179.0:
                 raise ValueError("fov must be between 1 and 179 degrees")
-            if new_fov != source.fov:
-                source.fov = new_fov
-                changed = True
+        changed = pos != source.position or rot != source.rotation or new_fov != source.fov
         if changed:
-            self._emit(CameraPoseEvent(source_id, list(source.position), list(source.rotation), source.fov))
+            source.position, source.rotation, source.fov = pos, rot, new_fov
+            self._emit(CameraPoseEvent(source_id, list(pos), list(rot), new_fov))
         return True
 
     def take(self) -> bool:
