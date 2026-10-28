@@ -19,6 +19,9 @@ from docx import Document
 from PIL import Image
 from modules.foresight_file_formats import convert
 from modules.foresight_workspace import create_workspace_router
+from modules.writers_room import create_writers_room_router
+from modules.auth_routes import router as auth_router
+from modules import userdb
 from modules.auth import create_access_token
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -37,7 +40,12 @@ window.restore=()=>mount(JSON.parse(localStorage.getItem('file-data')),localStor
 
 
 @pytest.fixture
-def page(tmp_path):
+def page(tmp_path, monkeypatch):
+    # A real user database in this test's own folder, with a real owner made by first-run setup, so the
+    # session check and the owner-scoped working copies run their real code.
+    monkeypatch.setattr(userdb, "_DB_PATH", tmp_path / "users.db")
+    userdb._sync_init_db()
+    assert userdb._sync_create_owner_via_setup("offline-writer", "offline-writer-password-1234")
     with sync_playwright() as p:
         engine = os.environ.get("FORESIGHT_TEST_BROWSER", "chromium")
         browser = (
@@ -55,6 +63,10 @@ def page(tmp_path):
         external = []
         api_app = FastAPI()
         api_app.include_router(create_workspace_router(tmp_path))
+        # The real routes the file provider and 2i now call before they open a file: the signed-in owner
+        # (/api/writers-room/config scopes working copies) and the session check (/api/auth/*).
+        api_app.include_router(create_writers_room_router(tmp_path))
+        api_app.include_router(auth_router)
         api_client = TestClient(api_app)
         test_token = create_access_token({"sub": "offline-writer", "role": "owner"})
         context.add_init_script(
@@ -70,7 +82,7 @@ def page(tmp_path):
                 r.abort()
                 return
             path = address.path
-            if path.startswith("/api/foresight/workspace/"):
+            if path.startswith(("/api/foresight/workspace/", "/api/writers-room/", "/api/auth/")):
                 response = api_client.request(
                     r.request.method,
                     path + ("?" + address.query if address.query else ""),
@@ -372,30 +384,35 @@ def test_python_syntax_check_in_native_editor_without_external_services(page):
     )
 
 
-def test_normal_2i_manuscript_saves_to_local_folder_and_updates(page):
+def test_normal_2i_manuscript_saves_to_reach_and_each_save_is_a_new_revision(page):
+    """Signed in to Reach, 2i keeps a normal manuscript on the host (/api/writers-room/documents), owner-scoped,
+    one revision per save. (Before the real config route was served here, this test expected the offline
+    local-folder fallback, which only applies when Reach does not answer.)"""
+    import json, sqlite3
     page.goto("http://localhost/writers-room")
     text = page.locator("#soloTextarea")
     text.wait_for()
     page.wait_for_function("document.querySelector('#saveBtn').disabled===false")
     text.fill("Local manuscript\nSecond paragraph")
-    page.once("dialog", lambda d: d.accept("Manuscripts/offline.2i"))
     page.locator("#saveBtn").click()
-    page.wait_for_function(
-        "document.querySelector('#saveIndicator').textContent.includes('Saved local file')"
-    )
-    import json
+    page.wait_for_function("document.querySelector('#saveIndicator').textContent.includes('Saved to Reach · revision 1')")
 
-    disk = list(page.workspace_root.rglob("offline.2i"))[0]
-    assert json.loads(disk.read_text())["state"]["committed"] == [
-        "Local manuscript",
-        "Second paragraph",
-    ]
+    def stored():
+        with sqlite3.connect(page.workspace_root / "writers_room" / "documents.sqlite3") as db:
+            rows = db.execute("SELECT owner, revision, payload FROM documents").fetchall()
+        assert len(rows) == 1
+        owner, revision, payload = rows[0]
+        return owner, revision, json.loads(payload)["state"]["committed"]
+
+    assert stored() == ("offline-writer", 1, ["Local manuscript", "Second paragraph"])
     text.fill("Updated manuscript")
     page.locator("#saveBtn").click()
-    page.wait_for_function(
-        "document.querySelector('#saveIndicator').textContent.includes('Saved local file')"
-    )
-    assert json.loads(disk.read_text())["state"]["committed"] == ["Updated manuscript"]
+    page.wait_for_function("document.querySelector('#saveIndicator').textContent.includes('Saved to Reach · revision 2')")
+    assert stored() == ("offline-writer", 2, ["Updated manuscript"])
+    # and it comes back on reopen
+    page.reload()
+    page.locator("#soloTextarea").wait_for()
+    page.wait_for_function("document.querySelector('#soloTextarea').value.includes('Updated manuscript')", timeout=15000)
 
 
 def test_local_audio_decodes_plays_and_reopens_offline(page):
