@@ -12,6 +12,7 @@ on:
       - 'static/world.html'
       - 'modules/pubcast_world*.py'
       - 'modules/pubworld_hotspots.py'
+      - 'modules/studio_progress.py'
       - 'data/world/**'
       - 'tools/build_world_json.py'
       - 'tools/world_src/**'
@@ -62,7 +63,7 @@ jobs:
           python -m pytest -q -p no:cacheprovider --timeout=300 \
             tests/test_pubcast_world.py tests/test_pubcast_world_placement.py tests/test_pubcast_world_json.py \
             tests/test_world_walk_browser.py tests/test_world_walk_glb_browser.py \
-            tests/test_world_walk_host_integration.py tests/test_bella_faux_pas_launch_acceptance.py \
+            tests/test_world_walk_host_integration.py tests/test_bella_faux_pas_launch_acceptance.py tests/test_bella_faux_pas_progress.py \
             tests/test_00_integrity.py tests/test_02_routing.py tests/test_foresight_front_door.py tests/test_no_user_audit.py \
             --junitxml=bella-faux-pas-junit.xml
       - name: Upload test results

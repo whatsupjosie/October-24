@@ -5,6 +5,16 @@ Foresight inside this Build. It is **not** a declaration that all of PubCast is
 finished. Never treat a file, route, recovered donor, or test fixture as proof
 of live functionality.
 
+## 2026-10-28: saving across PubCast (in progress)
+
+Ledger: `handoffs/SAVING_2026-10-28.md`.
+
+- **2i file workspace tests:** `tests/test_foresight_file_workspace.py` now runs against the real writers-room and auth routes. It was 13 failed, now 14 passed.
+- **Bella Faux Pas progress** is now saved on the host per owner (`modules/studio_progress.py`, `/api/studio/progress`). It covers room, spot, who you walk as, your library avatar for each character, hologram, size tuning and cans.
+  - The studio can wear avatars from the avatar library.
+  - `tests/test_bella_faux_pas_progress.py` quits and restarts `run_reach.py` and checks that all of it comes back: 11 passed.
+- **Not done yet:** a host copy of the Counter layout, cartridge creation in PubPartner, and one restart test across every save.
+
 ## 2026-10-27: Bella Faux Pas Studio (walkable world) integrated
 
 Details and ledger: `handoffs/WORLD_WALK_INTEGRATION_2026-10-27.md`. Guide: `docs/WORLD_WALK.md`.

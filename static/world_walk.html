@@ -104,7 +104,12 @@ textarea { width: 100%; height: 90px; background: var(--bg); color: var(--ink); 
     </div>
     <input type="file" id="glbFile" accept=".glb,model/gltf-binary" hidden>
     <label><input type="checkbox" id="glbHolo"> Hologram look (glowing outline)</label>
+    <label class="small" id="glbLibraryRow" hidden>Your saved avatars
+      <select id="glbLibrary" aria-label="Your saved avatars"><option value="">(none for this character)</option></select></label>
+    <div class="small dim" id="glbImportRow" hidden><a href="/static/avatar_import.html" target="_blank" rel="noopener">Import a new avatar&hellip;</a>
+      It is sized to its canonical height and kept in your library. A file loaded with "Load a GLB" is only for now.</div>
     <div id="glbInfo" class="small dim"></div>
+    <div id="progressInfo" class="small dim" role="status" aria-live="polite"></div>
 
     <h2>Show</h2>
     <label><input type="checkbox" id="shPads" checked> Floor pads (walkable areas)</label>
@@ -294,6 +299,8 @@ const S = {
   hover: null, fit: { s: 1, ox: 0, oy: 0, cw: 1, ch: 1 }, refs: [], lastReadout: "",
   cans: {}, canArm: null, canSel: -1, canDrag: null,
   vel: [0, 1], moving: false, path: [],
+  avatarIds: {},            // character -> avatar id in the library, so the choice is kept with your progress
+  library: [],
 };
 const CAN_IN = 4.83, CAN_W_IN = 2.6;     // a 12 oz can: height and diameter in inches
 const CANS_KEY = "pubcast_world_walk_cans_v1";
@@ -1047,7 +1054,7 @@ $("viewSel").addEventListener("change", e => {
   const [r, v] = e.target.value.split("/"); S.history = []; setView(r, v, {});
   e.target.blur();                                  // so the arrow keys walk instead of flipping through rooms
 });
-document.querySelectorAll("input[name=char]").forEach(r => r.addEventListener("change", e => { S.char = e.target.value; }));
+document.querySelectorAll("input[name=char]").forEach(r => r.addEventListener("change", e => { S.char = e.target.value; syncLibrarySelect(); }));
 const bind = (id, k) => $(id).addEventListener("change", e => { S.show[k] = e.target.checked; });
 bind("shPads", "pads"); bind("shOcc", "occ"); bind("shDoors", "doors"); bind("shHorizon", "horizon"); bind("shRefs", "refs"); bind("shAlt", "alt");
 $("themeLight").addEventListener("change", e => {
@@ -1173,20 +1180,79 @@ async function loadGlb(url, label) {
     G.state.lastError = "";
     setGlbInfo(r.skinned ? "" : "Note: this file is not rigged, so it will glide without animating.");
     toast(CHAR[S.char].label + " is now " + label);
-  } catch (e) { G.state.lastError = String(e && e.message || e); setGlbInfo(); toast("That file would not load: " + G.state.lastError); }
+    return true;
+  } catch (e) { G.state.lastError = String(e && e.message || e); setGlbInfo(); toast("That file would not load: " + G.state.lastError); return false; }
 }
-$("glbMannequin").addEventListener("click", () => loadGlb("/static/world/test_avatars/Xbot.glb", "test mannequin"));
+$("glbMannequin").addEventListener("click", () => { delete S.avatarIds[S.char]; loadGlb("/static/world/test_avatars/Xbot.glb", "test mannequin").then(syncLibrarySelect); });
 $("glbPick").addEventListener("click", () => $("glbFile").click());
 $("glbFile").addEventListener("change", e => {
   const f = e.target.files && e.target.files[0]; if (!f) return;
-  const url = URL.createObjectURL(f); loadGlb(url, f.name).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); e.target.value = "";
+  delete S.avatarIds[S.char];
+  const url = URL.createObjectURL(f); loadGlb(url, f.name).then(syncLibrarySelect).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); e.target.value = "";
 });
-$("glbClear").addEventListener("click", () => { const G = window.PubCastGLB; if (G) G.clear(S.char); setGlbInfo(); });
+$("glbClear").addEventListener("click", () => { const G = window.PubCastGLB; if (G) G.clear(S.char); delete S.avatarIds[S.char]; syncLibrarySelect(); setGlbInfo(); });
 $("glbHolo").addEventListener("change", e => { const G = window.PubCastGLB; if (G) G.setHologram(e.target.checked); });
 canvas.addEventListener("dragover", e => e.preventDefault());
 canvas.addEventListener("drop", e => {
   e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (f && /\.glb$/i.test(f.name)) { const url = URL.createObjectURL(f); loadGlb(url, f.name).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); }
+});
+
+/* ------------------------------ your progress (kept on the host) ---------- */
+function libraryEntry(id) { return S.library.find(a => a.id === id) || null; }
+function syncLibrarySelect() {
+  const sel = $("glbLibrary"); if (!sel) return;
+  sel.textContent = "";
+  sel.appendChild(new Option("(none for this character)", ""));
+  for (const a of S.library) sel.appendChild(new Option(a.name + (a.canonical_height_in ? "  (" + a.canonical_height_in + " in)" : ""), a.id));
+  sel.value = S.avatarIds[S.char] && libraryEntry(S.avatarIds[S.char]) ? S.avatarIds[S.char] : "";
+}
+async function refreshLibrary() {
+  const L = window.PubCastLive; if (!L) return;
+  S.library = await L.avatarLibrary();
+  const host = L.state.host === true;
+  $("glbLibraryRow").hidden = !host; $("glbImportRow").hidden = !host;
+  syncLibrarySelect();
+}
+$("glbLibrary").addEventListener("change", async e => {
+  const a = libraryEntry(e.target.value);
+  if (!a) { const G = window.PubCastGLB; if (G) G.clear(S.char); delete S.avatarIds[S.char]; setGlbInfo(); return; }
+  if (await loadGlb(a.url, a.name)) S.avatarIds[S.char] = a.id;
+  syncLibrarySelect();
+});
+/* wait for the 3D part (a module that loads on its own) before putting saved avatars on */
+function glbReady() {
+  return window.PubCastGLB ? Promise.resolve(window.PubCastGLB)
+    : new Promise(res => document.addEventListener("pubcast-glb-ready", () => res(window.PubCastGLB), { once: true }));
+}
+async function wearSavedAvatars() {
+  const G = await glbReady();
+  for (const [ch, id] of Object.entries(S.avatarIds)) {
+    const a = libraryEntry(id); if (!a || !CHAR[ch]) { delete S.avatarIds[ch]; continue; }
+    try { await G.load(ch, a.url, a.name); } catch (e) { G.state.lastError = String(e && e.message || e); delete S.avatarIds[ch]; }
+  }
+  setGlbInfo(); syncLibrarySelect();
+}
+function progressSnapshot() {
+  if (!S.room || !S.view) return null;
+  const closeup = S.history.length > 0;               // a close-up returns you to the room you came from
+  const base = closeup ? S.history[0] : { room: S.room.id, view: S.view.id, pos: S.pos };
+  const G = window.PubCastGLB;
+  return { room: base.room, view: base.view, pos: [Math.round(base.pos[0] * 100) / 100, Math.round(base.pos[1] * 100) / 100],
+           char: S.char, avatars: Object.assign({}, S.avatarIds), hologram: !!(G && G.state.hologram), tune: S.tune, cans: S.cans };
+}
+function keepProgress(now) {
+  const L = window.PubCastLive; if (!L) return;
+  if (!now && (S.moving || S.target)) return;          // saved when you stop, not every step
+  const snap = progressSnapshot(); if (snap) L.saveProgress(snap, now);
+}
+setInterval(() => keepProgress(false), 1000);
+addEventListener("pagehide", () => keepProgress(true));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") keepProgress(true); });
+window.addEventListener("pubcast:live-status", e => {
+  const st = e.detail || {}, box = $("progressInfo"); if (!box) return;
+  box.textContent = st.host === false ? "Progress is kept only when PubCast is running behind this page."
+    : st.progressSavedAt ? "Progress saved on this PubCast (revision " + st.progressRevision + ")." : "";
 });
 
 /* ------------------------------ boot -------------------------------------- */
@@ -1201,11 +1267,24 @@ window.PubCastWalk = {
   try {
     await loadWorld(); fillViewSelect();
     const q = new URLSearchParams(location.search), k = q.get("view"), live = q.get("live");
+    // what you saved on this PubCast: your tuning, who you walk as and your avatars always come back; your room and
+    // spot come back unless this link asks for a particular place
+    const L = window.PubCastLive, saved = L ? await L.loadProgress() : null;
+    if (saved) {
+      if (saved.tune && typeof saved.tune === "object") { S.tune = saved.tune; saveTune(); }
+      if (saved.cans && typeof saved.cans === "object") { S.cans = saved.cans; saveCans(); }
+      if (saved.char && CHAR[saved.char]) { S.char = saved.char; const r = document.querySelector('input[name=char][value="' + saved.char + '"]'); if (r) r.checked = true; }
+      if (saved.avatars && typeof saved.avatars === "object") S.avatarIds = Object.assign({}, saved.avatars);
+    }
+    const resume = saved && !k && !live && saved.room && S.rooms[saved.room] && !S.rooms[saved.room].locked ? saved : null;
     const byLive = live ? S.world.rooms.find(r => r.views.length && !r.locked && (r.live_id === live || r.layout_id === live || r.id === live)) : null;
     // with no ?live= or ?view=, start where the world says (the dressing room), else the first room that has a picture
     const home = S.world.rooms.find(r => r.id === S.world.start && r.views.length && !r.locked) || S.world.rooms.find(r => r.views.length);
-    const first = byLive ? [byLive.id, null] : k && k.includes("/") ? k.split("/") : [home.id, null];
+    const first = byLive ? [byLive.id, null] : k && k.includes("/") ? k.split("/") : resume ? [resume.room, resume.view || null] : [home.id, null];
     await setView(first[0], first[1], { instant: true });
+    if (resume && Array.isArray(resume.pos) && S.view.id === (resume.view || S.view.id) && S.view.zones.length && walkable(S.view, resume.pos)) S.pos = resume.pos.slice();
+    refreshLibrary().then(() => { if (Object.keys(S.avatarIds).length) wearSavedAvatars(); });
+    if (saved && typeof saved.hologram === "boolean") { $("glbHolo").checked = saved.hologram; glbReady().then(G => G.setHologram(saved.hologram)); }
     if (q.get("pads") === "0") { S.show.pads = false; $("shPads").checked = false; }
     if (q.get("refs") === "1") { S.show.refs = true; $("shRefs").checked = true; }
     if (q.get("occ") === "1") { S.show.occ = true; $("shOcc").checked = true; }

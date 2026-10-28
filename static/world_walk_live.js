@@ -230,17 +230,77 @@
     sc.onload = () => { if (state.room) global.dispatchEvent(new CustomEvent("pubcast:room", { detail: { room: state.room } })); };
     global.document.head.appendChild(sc);
   }
-  async function start() {
-    if (pingTimer || state.host === false) return;
-    state.host = await detectHost();
-    announce();
-    if (!state.host) return;
-    loadAudioRuntime();
-    setTimeout(connect, CONNECT_DELAY_MS);
-    pingTimer = setInterval(() => send({ type: "ping" }), PING_MS);
+  let starting = null;
+  /* Resolves to whether the host is there; starts the live link once (safe to call any number of times). */
+  function start() {
+    if (!starting) starting = (async () => {
+      state.host = await detectHost();
+      announce();
+      if (!state.host) return false;
+      loadAudioRuntime();
+      setTimeout(connect, CONNECT_DELAY_MS);
+      pingTimer = setInterval(() => send({ type: "ping" }), PING_MS);
+      return true;
+    })();
+    return starting;
   }
   function stop() { stopped = true; clearInterval(pingTimer); pingTimer = null; clearTimeout(reconnectTimer); try { if (ws) ws.close(); } catch (e) { /* closed */ } setOnline(false); }
 
-  global.PubCastLive = { state, actionFor, use, call, describe, enterView, start, stop, ACTION_BY_ID };
+  /* ---- Bella Faux Pas progress on the host (modules/studio_progress.py): one record per signed-in owner ---- */
+  const PROGRESS_URL = "/api/studio/progress";
+  const saving = { pending: null, timer: null, lastSent: "", inflight: null };
+  state.progressRevision = 0; state.progressSavedAt = null;
+  async function loadProgress() {
+    if (!(await start())) return null;
+    try {
+      const r = await fetch(PROGRESS_URL, { cache: "no-store" });
+      if (!r.ok || !/json/i.test(r.headers.get("content-type") || "")) return null;
+      const j = await r.json();
+      state.progressRevision = j.revision || 0; state.progressSavedAt = j.saved_at || null;
+      saving.lastSent = JSON.stringify(j.progress || null);
+      return j.progress || null;
+    } catch (e) { return null; }
+  }
+  async function flushProgress(keepalive) {
+    const p = saving.pending; if (!p || state.host !== true) return false;
+    saving.pending = null; clearTimeout(saving.timer);
+    const body = JSON.stringify(p);
+    try {
+      const r = await fetch(PROGRESS_URL, { method: "PUT", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ progress: p }), keepalive: !!keepalive });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      saving.lastSent = body; state.progressRevision = j.revision; state.progressSavedAt = j.saved_at; announce();
+      return true;
+    } catch (e) {
+      state.lastError = "Could not save studio progress (" + ((e && e.message) || e) + "); it will try again";
+      if (!saving.pending) { saving.pending = p; saving.timer = setTimeout(() => flushProgress(false), 5000); }
+      announce();
+      return false;
+    }
+  }
+  /* Ask for `p` (the walker's whole progress snapshot) to be kept. Unchanged snapshots cost nothing; changes are
+     grouped and sent a moment later, or straight away with now=true (used when the page is closing). */
+  function saveProgress(p, now) {
+    if (state.host !== true || !p) return;
+    const body = JSON.stringify(p);
+    if (body === saving.lastSent && !saving.pending) return;
+    saving.pending = p; clearTimeout(saving.timer);
+    if (now) flushProgress(true);
+    else saving.timer = setTimeout(() => flushProgress(false), 900);
+  }
+  /* Your avatars in the avatar library (modules/avatar_imports.py), each already at its canonical height. */
+  async function avatarLibrary() {
+    if (!(await start())) return [];
+    try {
+      const r = await fetch("/api/avatars/imports", { cache: "no-store" });
+      if (!r.ok) return [];
+      const j = await r.json();
+      return Array.isArray(j.avatars) ? j.avatars.filter(a => a && a.id && a.url) : [];
+    } catch (e) { return []; }
+  }
+
+  global.PubCastLive = { state, actionFor, use, call, describe, enterView, start, stop, ACTION_BY_ID,
+                         loadProgress, saveProgress, flushProgress, avatarLibrary };
   start();
 })(window);
