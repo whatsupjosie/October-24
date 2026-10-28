@@ -117,7 +117,7 @@ import * as THREE from 'three';
 // ═══ RENDERER ══════════════════════════════════════════════════════════════
 
 const canvas = document.getElementById('stage-canvas');
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false, powerPreference:'low-power'});
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, preserveDrawingBuffer:true, alpha:false, powerPreference:'low-power'});
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));  // cap for Zoidberg
 renderer.shadowMap.enabled = true;

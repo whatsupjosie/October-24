@@ -746,6 +746,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         ("/api/foresight/files/", 44 * 1024 * 1024),
         ("/api/writers-room/documents/", 3 * 1024 * 1024),  # 2i documents may be up to 2 MB of JSON
         ("/api/media/intake", 256 * 1024 * 1024),
+        ("/api/studio/slate/takes/", 128 * 1024 * 1024),
         ("/api/avatars/imports", 210 * 1024 * 1024),  # avatar GLBs; the route caps the file at 200 MB
     )
 

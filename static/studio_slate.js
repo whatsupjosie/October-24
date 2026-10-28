@@ -7,6 +7,7 @@
   let snapshot = null, socket = null, timer, closed = false, pending = false;
   let offset = 0, bestRTT = Infinity, scheduled = '', clockUncertainty = Infinity;
   let context, micContext, micStream, micNode, micSource, muteSink, voiceUntil = 0;
+  let takeRecorder=null, takeResult=null, takeBusy=false;
   let crewDirty=false;
   let listening = false, microphone = false, micStarting = false, dirty = false;
   const root = document.createElement('section');
@@ -14,9 +15,9 @@
   root.innerHTML = `<div class="slate-wrap"><h1>Production floor · <span data-phase>standby</span></h1>
     <p>The director is calling departments. Check in at your assigned station.</p>
     <div class="clacker" aria-label="Raised clacker"></div><div class="board"><div class="fields"></div><div class="roll"></div></div>
-    <p class="status" role="status"></p><p class="sync">Clock measuring · recorded audio/video alignment unverified</p>
+    <p class="status" role="status"></p><div data-take-result role="status"></div><p class="sync">Clock measuring · recorded audio/video alignment unverified</p>
     <div class="actions"><button data-action="listen">Enable director audio</button><button data-action="mic" hidden>Start director microphone</button>
-    <button data-action="save" hidden>Save slate</button><button data-action="standby" hidden>Call stations / roll call</button>
+    <button data-action="record-take" hidden>Arm stage take recorder</button><button data-action="save" hidden>Save slate</button><button data-action="standby" hidden>Call stations / roll call</button>
     <button data-action="clap" hidden>Clap / begin take</button><button data-action="hide" hidden>Dismiss on every screen</button>
     <button data-action="close">Close my editor</button></div>
     <details data-editor hidden><summary>Departments and assistant permissions</summary>
@@ -26,7 +27,10 @@
     <div class="crew-brain" aria-label="Session AI crew reference"></div><div data-crew></div><button data-action="add-crew">Add crew assignment</button><button data-action="crew">Save crew assignments</button></details>
     <button data-action="end" hidden>End production</button></div>`;
   const launcher = document.createElement('button'); launcher.id='pubcast-slate-open'; launcher.textContent='Production slate'; launcher.hidden=true;
-  document.body.append(root, launcher);
+  const stopTake=document.createElement('button');stopTake.id='pubcast-stop-take';stopTake.textContent='Stop take / save';stopTake.hidden=true;
+  stopTake.style.cssText='position:fixed;left:14px;bottom:14px;z-index:2147483001;background:#a32d28;color:white;padding:14px;border:0;border-radius:6px';
+  stopTake.onclick=()=>takeRecorder?.stop();
+  document.body.append(root, launcher, stopTake);
   const $ = s => root.querySelector(s);
   const status = message => $('.status').textContent = message;
   const fields = {};
@@ -62,13 +66,13 @@
     if(!snapshot)return;
     const s=snapshot.slate, editor=snapshot.can_edit, director=snapshot.is_director;
     launcher.hidden=false;
-    if(!s||s.phase==='ended'){root.hidden=true;launcher.textContent='Open production slate';stopMic();return;}
+    if(!s||s.phase==='ended'){if(takeRecorder?.active)takeRecorder.stop();root.hidden=true;launcher.textContent='Open production slate';stopMic();return;}
     launcher.textContent='Production slate · '+s.phase;
     if(s.visible)root.hidden=false;
     else if(root.dataset.forced!=='yes')root.hidden=true;
     $('[data-phase]').textContent=s.phase==='standby'?'STATIONS / ROLL CALL':s.phase.toUpperCase();
     for(const [name,input]of Object.entries(fields)){input.readOnly=!editor;if(!dirty)input.value=s.fields[name]||'';}
-    for(const a of ['save','standby','clap','hide'])$(`[data-action="${a}"]`).hidden=!editor;
+    for(const a of ['save','standby','clap','hide','record-take'])$(`[data-action="${a}"]`).hidden=!editor;
     for(const a of ['mic','delegate','end'])$(`[data-action="${a}"]`).hidden=!director;
     root.querySelectorAll('[data-editor]').forEach(e=>e.hidden=!editor);
     $('[data-action="clap"]').disabled=s.phase!=='standby'||Object.values(s.departments).some(e=>!e.ready);
@@ -83,13 +87,14 @@
       if(e.user_id===snapshot.user_id&&s.phase==='standby'){const b=document.createElement('button');b.textContent=e.ready?'Not ready':'At station / ready';b.onclick=()=>command('ready',{department,ready:!e.ready});row.append(b);}
       $('.roll').append(row);
     }
+    if(!editor&&takeRecorder?.active)takeRecorder.stop();
     if(!director)stopMic();
     if(s.phase==='ended'||!s.visible)stopMic();
     const clacker=$('.clacker');clacker.classList.toggle('closed',s.phase==='take'&&Date.now()/1000+offset>=s.clap_at);
     clacker.setAttribute('aria-label',clacker.classList.contains('closed')?'Closed clacker':'Raised clacker');
     if(s.clap_at&&scheduled!==String(s.clap_at))scheduleClap(s.clap_at);
     if(!s.clap_at){scheduled='';clearTimeout(timer);}
-    $('.sync').textContent=`Clock uncertainty approximately ${Number.isFinite(clockUncertainty)?Math.round(clockUncertainty*1000)+' ms':'unmeasured'} · recorded audio/video alignment unverified`;
+    $('.sync').textContent=`Clock uncertainty approximately ${Number.isFinite(clockUncertainty)?Math.round(clockUncertainty*1000)+' ms':'unmeasured'} · `+(takeResult?.slate_id===s.id&&takeResult.status==='verified_recorded_cue'?`Latest saved take cue verified: ${takeResult.after.audio_minus_video_ms} ms residual.`:'Recorded take awaits encoded-file verification.');
   }
   function scheduleClap(at){
     scheduled=String(at);clearTimeout(timer);
@@ -97,10 +102,12 @@
     // A late join sees the closed board; never replays an old synchronization cue.
     if(delay<=0){$('.clacker').classList.add('closed');return;}
     timer=setTimeout(()=>{$('.clacker').classList.add('closed');$('.clacker').setAttribute('aria-label','Closed clacker');},delay*1000);
-    if(listening&&context?.state==='running'){
+    if((listening||takeRecorder?.active)&&context?.state==='running'){
       const oscillator=context.createOscillator(),gain=context.createGain(),start=context.currentTime+delay;
       oscillator.frequency.value=1500;gain.gain.setValueAtTime(.3,start);gain.gain.exponentialRampToValueAtTime(.001,start+.025);
-      oscillator.connect(gain).connect(context.destination);oscillator.start(start);oscillator.stop(start+.03);
+      oscillator.connect(gain);if(listening)gain.connect(context.destination);
+      if(takeRecorder?.active){takeRecorder.markClap(start);gain.connect(takeRecorder.destination);}
+      oscillator.start(start);oscillator.stop(start+.03);
     }
   }
   async function refresh(){
@@ -148,13 +155,78 @@
     micSource=micContext.createMediaStreamSource(micStream);micNode=micContext.createScriptProcessor(1024,1,1);
     muteSink=micContext.createGain();muteSink.gain.value=0;micSource.connect(micNode);micNode.connect(muteSink).connect(micContext.destination);
     micNode.onaudioprocess=e=>{if(socket?.readyState===WebSocket.OPEN&&socket.bufferedAmount<64000)socket.send(JSON.stringify({samples:Array.from(e.inputBuffer.getChannelData(0),v=>Math.round(Math.max(-1,Math.min(1,v))*10000)/10000)}));};
+    takeRecorder?.attachMicrophone(micStream);
     microphone=true;$('[data-action="mic"]').textContent='Stop director microphone';status('Director microphone LIVE to listeners who enabled audio');
   }
-  function stopMic(){micNode?.disconnect();micSource?.disconnect();muteSink?.disconnect();micStream?.getTracks().forEach(t=>t.stop());micContext?.close().catch(()=>{});micContext=null;micStream=null;micNode=null;micSource=null;muteSink=null;microphone=false;$('[data-action="mic"]').textContent='Start director microphone';}
+  function stopMic(){takeRecorder?.attachMicrophone(null);micNode?.disconnect();micSource?.disconnect();muteSink?.disconnect();micStream?.getTracks().forEach(t=>t.stop());micContext?.close().catch(()=>{});micContext=null;micStream=null;micNode=null;micSource=null;muteSink=null;microphone=false;$('[data-action="mic"]').textContent='Start director microphone';}
+  function findStage(win=window){
+    if(win.PubCastStageCamera&&win.document.querySelector('canvas'))return win;
+    for(const frame of win.document.querySelectorAll('iframe')){try{const found=findStage(frame.contentWindow);if(found)return found;}catch(_){}}
+    return null;
+  }
+  function localDownload(blob,name){
+    const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.textContent='Save '+name;
+    $('[data-take-result]').append(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},300000);
+  }
+  async function saveTake(blob,slateId,timing,sourceRecorder){
+    stopTake.hidden=true;takeBusy=true;root.dataset.forced='yes';root.hidden=false;
+    const result=$('[data-take-result]');result.textContent='Original recorded locally. Measuring encoded clap timing… ';
+    localDownload(blob,'PubCast-take-'+Date.now()+'.webm');
+    try{
+      const response=await nativeFetch('/api/studio/slate/takes/'+encodeURIComponent(slateId),{method:'POST',headers:{Authorization:'Bearer '+token(),'Content-Type':blob.type},body:blob});
+      if(!response.ok)throw Error('Take upload HTTP '+response.status);
+      takeResult=await response.json();
+      const markers=await nativeFetch('/api/studio/slate/takes/'+encodeURIComponent(slateId)+'/'+takeResult.take_id+'/timing',{method:'POST',headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify({...timing,original_sha256:takeResult.original_sha256})});
+      if(!markers.ok)throw Error('Video preserved; timing-marker save HTTP '+markers.status);
+      const markerResult=await markers.json();
+      for(const [label,url,extension]of [['Save edit copy · separate sync track',markerResult.editing_url,'-editing.mp4'],['Save Sync Reference audio',markerResult.reference_url,'-sync-reference.wav']]){
+        if(!url)continue;const b=document.createElement('button');b.disabled=true;b.textContent=label;b.onclick=async()=>{try{const r=await nativeFetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('Download HTTP '+r.status);localDownload(await r.blob(),takeResult.take_id+extension);}catch(e){status(e.message);}};result.append(b);
+      }
+      if(markerResult.reference_track_error){const warning=document.createElement('p');warning.textContent='Clean aligned take saved; separate reference track unavailable: '+markerResult.reference_track_error;result.append(warning);}
+      const saveMarkers=document.createElement('button');saveMarkers.textContent='Save silent edit markers';saveMarkers.onclick=()=>localDownload(new Blob([JSON.stringify(timing,null,2)],{type:'application/json'}),takeResult.take_id+'-timing.json');result.append(saveMarkers);
+      for(let i=0;i<sourceRecorder.stemNames.length;i++){
+        const name=sourceRecorder.stemNames[i];status('Saving separate audio track: '+name);
+        const saved=await nativeFetch('/api/studio/slate/takes/'+slateId+'/'+takeResult.take_id+'/stem/'+name,{method:'POST',headers:{Authorization:'Bearer '+token(),'Content-Type':'audio/wav'},body:sourceRecorder.stemBlob(i)});
+        if(!saved.ok)throw Error('Stem '+name+' save HTTP '+saved.status);
+      }
+      const stemResponse=await nativeFetch('/api/studio/slate/takes/'+slateId+'/'+takeResult.take_id+'/stems',{method:'POST',headers:{Authorization:'Bearer '+token()}});
+      if(!stemResponse.ok)throw Error('Audio stem alignment HTTP '+stemResponse.status);
+      const stemReport=await stemResponse.json();sourceRecorder.stemBlocks=[];result.querySelectorAll('button').forEach(b=>b.disabled=false);
+      for(const stem of stemReport.tracks){const b=document.createElement('button');b.textContent='Save '+(stem.name==='dialogue'?'Vocals / Dialogue':stem.name)+' track';b.onclick=async()=>{try{const r=await nativeFetch(stem.url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('Download HTTP '+r.status);localDownload(await r.blob(),takeResult.take_id+'-'+stem.name+'.wav');}catch(e){status(e.message);}};result.append(b);}
+      const timeline=document.createElement('a');timeline.href='/static/take_editor.html?slate='+slateId+'&take='+takeResult.take_id;timeline.textContent='Open take timeline';timeline.target='_self';result.append(timeline);
+      const message=document.createElement('p');message.textContent=takeResult.status==='verified_recorded_cue'?
+        `Recorded cue verified: ${takeResult.after.audio_minus_video_ms} ms residual (tolerance ${takeResult.after.tolerance_ms} ms).`:
+        'Original preserved. Sync not verified: '+takeResult.reason;
+      result.append(message);
+      for(const [label,url]of [['Save aligned take',takeResult.aligned_url],['Save sync report',takeResult.original_url?.replace(/original$/,'report')]]){
+        if(!url)continue;const b=document.createElement('button');b.textContent=label;b.onclick=async()=>{try{const r=await nativeFetch(url,{headers:{Authorization:'Bearer '+token()}});if(!r.ok)throw Error('Download HTTP '+r.status);localDownload(await r.blob(),takeResult.take_id+(label.includes('report')?'-sync.json':'-aligned.mp4'));}catch(e){status(e.message);}};result.append(b);
+      }
+    }catch(error){const p=document.createElement('p');p.textContent=error.message+' · local recovery files remain available.';result.append(p);
+      for(let i=0;i<sourceRecorder.stemNames.length;i++){const b=document.createElement('button');b.textContent='Save local '+sourceRecorder.stemNames[i]+' track';b.onclick=()=>localDownload(sourceRecorder.stemBlob(i),'PubCast-local-'+sourceRecorder.stemNames[i]+'.wav');result.append(b);}
+    }
+    finally{takeBusy=false;takeRecorder=null;render();}
+  }
+  async function armTake(){
+    if(takeBusy||takeRecorder?.active)throw Error('A take is already recording or being saved');
+    if(!snapshot?.can_edit)throw Error('Director or delegated assistant required');
+    if(snapshot.slate.phase!=='standby')throw Error('Call stations before arming a take');
+    const stage=findStage();if(!stage)throw Error('Open the director console or a 3D stage to record real stage pixels');
+    context ||= new AudioContext();await context.resume();
+    takeBusy=true;
+    try{
+      if(!window.PubCastTakeRecorder)await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/static/studio_take_recorder.js';script.onload=resolve;script.onerror=()=>reject(Error('Take recorder could not load'));document.head.append(script);});
+      const slateId=snapshot.slate.id;
+      takeRecorder=new window.PubCastTakeRecorder({canvas:stage.document.querySelector('canvas'),audioContext:context,programRuntime:stage.PubcastProgramAudio,microphone:micStream,getSlate:()=>snapshot});
+      await takeRecorder.start();stopTake.hidden=false;takeBusy=false;
+      takeRecorder.finished.then(blob=>saveTake(blob,slateId,takeRecorder.timing(),takeRecorder)).catch(error=>{status(error.message);stopTake.hidden=true;takeRecorder=null;takeBusy=false;});
+      status('Recording actual stage + program audio. Clap once within two minutes, then dismiss the slate and film the take.');
+    }catch(error){takeRecorder?.release();takeRecorder=null;takeBusy=false;throw error;}
+  }
   launcher.onclick=async()=>{if(!snapshot?.slate||snapshot.slate.phase==='ended'){await command('create');}root.dataset.forced='yes';root.hidden=false;};
   root.addEventListener('click',async e=>{
     const action=e.target.closest('[data-action]')?.dataset.action;if(!action)return;
     try{
+      if(action==='record-take')return await armTake();
       if(action==='listen')return await enableAudio();
       if(action==='mic'){if(micStarting)return;micStarting=true;try{return microphone?stopMic():await startMic();}catch(error){stopMic();throw error;}finally{micStarting=false;}}
       if(action==='close'){if(snapshot.slate.visible)return status('The shared board stays on screen until the director dismisses it.');root.dataset.forced='';root.hidden=true;return;}
@@ -168,7 +240,7 @@
       root.dataset.forced='';await command(action);
     }catch(error){status(error.message);}
   });
-  window.addEventListener('pagehide',()=>{closed=true;stopMic();socket?.close();context?.close();clearTimeout(timer);});
-  window.PubCastSlate={refresh,open:()=>launcher.click()};
+  window.addEventListener('pagehide',()=>{closed=true;takeRecorder?.stop();stopMic();socket?.close();context?.close();clearTimeout(timer);});
+  window.PubCastSlate={refresh,open:()=>launcher.click(),getTiming:()=>takeRecorder?.timing(),getTakeResult:()=>takeResult};
   async function poll(){if(closed)return;await refresh();if(!closed)setTimeout(poll,1500);}poll();
 })();
