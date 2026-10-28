@@ -7,6 +7,7 @@ optional payload to call these stable backend actions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Dict, List, Mapping, Optional
 
 from .cameras import CameraManager
@@ -42,6 +43,7 @@ _ACTIONS = [
     StudioActionSpec("camera.switch.program", "Take program camera", "camera", "mod", "Set the live/program camera.", ["source_id"]),
     StudioActionSpec("camera.switch.preview", "Set preview camera", "camera", "safe", "Set the preview camera.", ["source_id"]),
     StudioActionSpec("camera.cut", "Cut cameras", "camera", "mod", "Swap program and preview.", []),
+    StudioActionSpec("camera.nudge", "Steer camera", "camera", "mod", "Aim, truck, roll or lift a virtual camera.", ["source_id", "mode"]),
     StudioActionSpec("recording.preflight", "Recording preflight", "recording", "safe", "Check selected sources and profile before recording.", []),
     StudioActionSpec("recording.start", "Start recording", "recording", "confirm", "Start a recording session after explicit confirmation.", ["confirm"]),
     StudioActionSpec("recording.stop", "Stop recording", "recording", "confirm", "Stop a recording session after explicit confirmation.", ["session_id", "confirm"]),
@@ -99,9 +101,38 @@ def execute_studio_action(
         preview = cameras.get_preview_source()
         if program is None or preview is None:
             raise ValueError("Both program and preview must be set before cut")
-        cameras.set_program_source(preview.source_id)
-        cameras.set_preview_source(program.source_id)
+        cameras.take()
         result = {"ok": True, "program": preview.source_id, "preview": program.source_id}
+    elif action_id == "camera.nudge":
+        source_id = _require(body, "source_id")
+        camera = cameras.get(source_id)
+        if camera is None:
+            raise ValueError("Camera source not found")
+        if camera.transport.value not in {"virtual", "voxel_3d"}:
+            raise ValueError("This source has no connected camera-motion driver")
+        def axis(key):
+            value = body.get(key, 0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not -1 <= value <= 1:
+                raise ValueError(f"{key} must be between -1 and 1")
+            return float(value)
+        x, y, z = axis("x"), axis("y"), axis("z")
+        position, rotation, fov = list(camera.position), list(camera.rotation), camera.fov
+        mode = str(body.get("mode") or "aim")
+        if mode == "aim":
+            rotation[0] = max(-89, min(89, rotation[0] - y * 3))
+            rotation[1] = (rotation[1] - x * 3 + 180) % 360 - 180
+        elif mode == "truck":
+            yaw = math.radians(rotation[1])
+            position[0] += (x * math.cos(yaw) + y * math.sin(yaw)) * 0.15
+            position[2] += (-x * math.sin(yaw) + y * math.cos(yaw)) * 0.15
+            position[1] += z * 0.15
+        elif mode == "roll_zoom":
+            rotation[2] = (rotation[2] + x * 3 + 180) % 360 - 180
+            fov = max(1, min(179, fov + y * 2))
+        else:
+            raise ValueError("Unknown joystick mode")
+        cameras.update_pose(source_id, position=position, rotation=rotation, fov=fov)
+        result = {"source_id": source_id, "position": position, "rotation": rotation, "fov": fov}
     elif action_id == "recording.preflight":
         sources = body.get("sources") if isinstance(body.get("sources"), list) else []
         result = recording_preflight(
@@ -134,6 +165,13 @@ def execute_studio_action(
     elif action_id == "audio.status":
         result = audio_state.status()
     elif action_id == "audio.event":
+        if body.get("action") == "set_volume" and "volume" not in body:
+            if "level" in body:
+                body["volume"] = body["level"]
+            elif "value" in body:
+                body["volume"] = body["value"]
+            else:
+                raise ValueError("set_volume requires volume")
         result = apply_audio_event(audio_state, body)
     elif action_id == "audio.stop_all":
         result = apply_audio_event(audio_state, {"action": "stop_all"})

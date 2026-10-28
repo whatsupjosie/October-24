@@ -913,6 +913,9 @@ async def lifespan(application: FastAPI):
                 await bot_manager.shutdown()
             if blackbox_witness is not None:
                 blackbox_witness.close()
+            production_capture = getattr(application.state, "production_capture", None)
+            if production_capture is not None:
+                await production_capture.shutdown()
             if rearmed_pete is not None and hasattr(rearmed_pete, "shutdown_twin_engine_system"):
                 try:
                     await rearmed_pete.shutdown_twin_engine_system()
@@ -1146,7 +1149,9 @@ async def lifespan(application: FastAPI):
     application.include_router(create_blackbox_router(blackbox_witness))
     recording = create_recording_service(DATA_DIR, cameras, blackbox_witness=blackbox_witness)
     program_audio_state = ProgramAudioState()
-    application.include_router(create_production_router(cameras, recording, hub, blackbox=blackbox_witness, program_audio_state=program_audio_state, include_overlapping_compat_routes=False))
+    production_router = create_production_router(cameras, recording, hub, blackbox=blackbox_witness, program_audio_state=program_audio_state, include_overlapping_compat_routes=False)
+    application.include_router(production_router)
+    application.state.production_capture = production_router.capture_engine
     from modules.pubcast_vision_integration import PubcastVisionManager
     from modules.pubcast_vision_routes import create_vision_router
     vision_manager = PubcastVisionManager(camera_manager=cameras, data_dir=DATA_DIR)
@@ -1880,6 +1885,9 @@ async def lifespan(application: FastAPI):
             logger.error("Camera broadcast shutdown incomplete; continuing other cleanup", exc_info=True)
     # Stop only processes started through this authenticated host boundary.
     _stop_shells = getattr(application.state, "foresight_stop_sessions", None)
+    production_capture = getattr(application.state, "production_capture", None)
+    if production_capture is not None:
+        await production_capture.shutdown()
     if callable(_stop_shells):
         await _stop_shells()
     if choreo_controller and hasattr(choreo_controller, "stop"):
@@ -1947,6 +1955,9 @@ _cors_origins, _cors_credentials = _resolve_cors_origins()
 app.add_middleware(CORSMiddleware,
     allow_origins=_cors_origins, allow_credentials=_cors_credentials,
     allow_methods=["*"], allow_headers=["*"])
+from modules.studio_slate import SlateOverlayMiddleware, create_slate_router
+app.add_middleware(SlateOverlayMiddleware)
+app.include_router(create_slate_router(DATA_DIR / "production_slates.sqlite3"))
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(BodySizeLimitMiddleware)
 from modules.unicode_guard import UnicodeGuardMiddleware  # noqa: E402

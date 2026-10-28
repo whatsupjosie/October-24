@@ -264,6 +264,20 @@ class FFmpegCaptureEngine:
     def is_capturing(self, session_id: str) -> bool:
         return session_id in self._active
 
+    def status(self, session_id: str) -> Dict:
+        """Report actual encoder processes and bytes, not just session intent."""
+        sources = []
+        for cp in self._active.get(session_id, []):
+            try:
+                size = cp.output_path.stat().st_size
+            except OSError:
+                size = 0
+            sources.append({"source_id": cp.source_id,
+                "running": cp.proc.returncode is None, "returncode": cp.proc.returncode,
+                "size_bytes": size})
+        return {"available": self.available, "running": bool(sources) and all(s["running"] for s in sources),
+                "sources": sources}
+
     def active_sessions(self) -> List[str]:
         return list(self._active.keys())
 

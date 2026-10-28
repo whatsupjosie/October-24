@@ -142,3 +142,18 @@ def test_stage_pages_use_the_room_safe_socket_path():
         text = (root / "static" / page).read_text(encoding="utf-8")
         assert f"websocketURL(`/ws/room/${{encodeURIComponent({var})}}`)" in text, page
         assert f"websocketURL(`/ws/${{{var}}}`)" not in text, page
+
+
+@pytest.mark.asyncio
+async def test_pose_events_reach_browser_bridge():
+    from modules.cameras import create_default_cameras
+    cameras=create_default_cameras()
+    class Hub:
+        def __init__(self): self.messages=[]
+        async def broadcast_system_event(self,event): self.messages.append(event)
+    hub=Hub();bridge=CameraBroadcastBridge(cameras,hub);bridge.start()
+    cameras.update_pose('wide_shot',rotation=[1,2,3])
+    await asyncio.sleep(.02)
+    assert hub.messages[-1]['type']=='camera_pose'
+    assert hub.messages[-1]['payload']['rotation']==[1,2,3]
+    await bridge.stop()

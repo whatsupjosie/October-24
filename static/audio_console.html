@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PubCast Audio Console</title>
   <link rel="stylesheet" href="/static/console_hotspot_renderer.css">
-</head>
+<link rel="stylesheet" href="/static/control_room_panel.css"></head>
 <body class="pc-console-page">
   <main class="pc-console-shell">
     <header class="pc-console-topbar">
@@ -18,7 +18,9 @@
       <span>Studio actions live</span>
     </footer>
   </main>
+  <section data-control-room-panel data-console-kind="audio"></section>
+  <script src="/static/reach_auth.js"></script>
   <script src="/static/studio_console_hotspots.js"></script>
   <script src="/static/console_hotspot_renderer.js"></script>
-</body>
+<script src="/static/control_room_panel.js"></script></body>
 </html>

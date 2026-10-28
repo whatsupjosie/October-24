@@ -42,6 +42,8 @@ from modules.studio_camera_preflight import all_camera_visibility, camera_visibi
 from modules.program_audio import ProgramAudioState
 from modules.program_audio_routes import create_program_audio_router
 from modules.studio_console_actions import execute_studio_action, list_studio_actions
+from modules.program_audio import validate_audio_event, apply_audio_event
+from modules.auth import role_gte
 
 logger = logging.getLogger("pubcast.production")
 
@@ -406,11 +408,49 @@ def create_production_router(
         """Return stable action IDs that future studio-console hotspots can call."""
         return {"actions": list_studio_actions()}
 
+    @router.get("/api/studio/console-state")
+    async def studio_console_state(identity: Dict[str, Any] = Depends(require_role("mod"))):
+        snapshot = cameras.snapshot()
+        sessions = []
+        for session in sorted(recording.list_sessions(), key=lambda s: s.started_at, reverse=True)[:50]:
+            item = session.to_dict()
+            item["capture"] = capture_engine.status(session.session_id) if capture_engine else {
+                "available": False, "running": False, "sources": []}
+            sessions.append(item)
+        return {"ok": True, "program": snapshot.program, "preview": snapshot.preview,
+            "cameras": [{"source_id": c.source_id, "name": c.name,
+                "transport": c.transport.value, "location": c.location,
+                "position": list(c.position), "rotation": list(c.rotation), "fov": c.fov} for c in cameras.list_sources()],
+            "sessions": sessions, "audio": program_audio_state.status(),
+            "profiles": [p.profile_id for p in recording.list_profiles()],
+            "production": hub.get_production_state() if hub and hasattr(hub, "get_production_state") else {}}
+
     @router.post("/api/studio/actions/{action_id}")
     async def studio_action_execute(action_id: str, request: Request, identity: Dict[str, Any] = Depends(require_role("mod"))):
         """Execute a stable studio action by ID for console art or hotspot overlays."""
         body = await _json_dict(request)
         actor = str(identity.get("user_id") or "director")
+        audio_event = None
+        if action_id in {"audio.event", "audio.stop_all"}:
+            event = dict(body) if action_id == "audio.event" else {"action": "stop_all"}
+            if event.get("action") == "set_volume" and "volume" not in event:
+                if "level" in event or "value" in event:
+                    event["volume"] = event.get("level", event.get("value"))
+                else:
+                    raise HTTPException(400, "set_volume requires volume")
+            try:
+                audio_event = validate_audio_event(event)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from None
+            audio_event["authorized_director"] = bool(audio_event.get("director_announcement")
+                and identity.get("authenticated") and role_gte(identity.get("role", "guest"), "mod"))
+            if ((audio_event.get("director_announcement") or
+                    audio_event.get("room") == "dressing" and audio_event["action"] == "play")
+                    and not audio_event["authorized_director"]):
+                raise HTTPException(403, "Authenticated director announcement required")
+            if audio_event["action"] == "play" and not str(audio_event.get("url") or "").strip():
+                raise HTTPException(400, "Choose a playable audio URL before sending a cue")
+            body = audio_event
         try:
             response = execute_studio_action(
                 action_id,
@@ -420,8 +460,12 @@ def create_production_router(
                 audio_state=program_audio_state,
                 actor=actor,
             )
-        except ValueError as exc:
+        except (ValueError, PermissionError, KeyError) as exc:
             raise HTTPException(400, str(exc))
+
+        if audio_event is not None and audio_event["action"] != "status":
+            response["event"] = program_audio_state.publish(audio_event)
+            response["delivery"] = "queued_for_players"
 
         if response.get("ok") and action_id == "recording.start":
             session_data = response.get("result", {})
@@ -633,9 +677,12 @@ def create_production_router(
         """Emergency: stop all recordings, mute, fade to black."""
         stopped = []
         for session in recording.list_sessions():
-            if session.state in (RecordingState.ACTIVE, RecordingState.COUNTDOWN):
+            if session.state in (RecordingState.ACTIVE, RecordingState.COUNTDOWN, RecordingState.PAUSED):
                 recording.stop_session(session.session_id)
+                await _stop_capture_for_session(session.session_id)
                 stopped.append(session.session_id)
+        apply_audio_event(program_audio_state, {"action": "stop_all"})
+        program_audio_state.publish({"action": "stop_all"})
 
         if hub:
             await hub.broadcast_system_event({
@@ -654,6 +701,7 @@ def create_production_router(
 
         return {"ok": True, "sessions_stopped": stopped}
 
+    router.capture_engine = capture_engine
     return router
 
 

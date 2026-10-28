@@ -33,8 +33,8 @@
 
   function actionPayload(hotspot, extra) {
     const payload = Object.assign({}, hotspot.payload || {}, extra || {});
-    if (payload.action === "set_volume" && payload.level === undefined) {
-      payload.level = payload.value !== undefined ? payload.value : 0.5;
+    if (payload.action === "set_volume" && payload.volume === undefined) {
+      payload.volume = payload.value !== undefined ? payload.value : 0.5;
     }
     return payload;
   }
@@ -82,8 +82,7 @@
       style: hotspotStyle(hotspot),
     });
     node.addEventListener("click", async () => {
-      node.classList.toggle("is-active", hotspot.kind === "button" || hotspot.kind === "fan");
-      await executeHotspot(hotspot);
+      if (!["knob", "dial"].includes(hotspot.kind)) await executeHotspot(hotspot);
     });
     return node;
   }
@@ -98,7 +97,7 @@
       type: "range",
       min: "0",
       max: "100",
-      value: String(Math.round((hotspot.default_value || 0.55) * 100)),
+      value: String(Math.round((hotspot.default_value ?? 0.55) * 100)),
       "aria-label": hotspot.label,
     });
     const send = () => {
@@ -107,7 +106,6 @@
       executeHotspot(hotspot, { value: value, level: value });
     };
     input.addEventListener("change", send);
-    input.addEventListener("pointerup", send);
     wrap.appendChild(input);
     return wrap;
   }
@@ -115,7 +113,7 @@
   function makeKnob(hotspot) {
     const node = makeButton(hotspot);
     node.classList.add("pc-console-knob");
-    state.values.set(hotspot.id, hotspot.default_value || 0.5);
+    state.values.set(hotspot.id, hotspot.default_value ?? 0.5);
 
     const setValue = (value) => {
       const clean = clamp01(value);
@@ -126,14 +124,14 @@
 
     node.addEventListener("wheel", (event) => {
       event.preventDefault();
-      setValue((state.values.get(hotspot.id) || 0.5) + (event.deltaY < 0 ? 0.05 : -0.05));
+      setValue((state.values.get(hotspot.id) ?? 0.5) + (event.deltaY < 0 ? 0.05 : -0.05));
     }, { passive: false });
 
     let startX = 0;
     let startValue = 0.5;
     node.addEventListener("pointerdown", (event) => {
       startX = event.clientX;
-      startValue = state.values.get(hotspot.id) || 0.5;
+      startValue = state.values.get(hotspot.id) ?? 0.5;
       node.setPointerCapture(event.pointerId);
     });
     node.addEventListener("pointerup", (event) => {

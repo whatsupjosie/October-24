@@ -18,8 +18,10 @@ def test_counter_and_character_services_with_real_startup(request, monkeypatch):
     }
     page = client.get("/foresight-counter")
     assert page.status_code == 200
+    overlay = b'<link rel="stylesheet" href="/static/studio_slate.css"><script defer src="/static/studio_slate.js"></script>'
+    assert page.content.count(overlay) == 1
     assert (
-        page.content
+        page.content.replace(overlay, b'')
         == (
             Path(__file__).resolve().parents[1] / "static/foresight_counter.html"
         ).read_bytes()

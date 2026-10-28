@@ -954,6 +954,11 @@ function showHotspotBubble(h) {
   S.bubbleFor = h;
   const a = h.action || {}, L = window.PubCastLive, live = L ? L.actionFor(h) : null;
   const btns = [];
+  const consolePages={'director-console':'/director-console','audio-console':'/audio-console','right-console':'/static/mini_console.html'};
+  if(S.room.id==='control_room'&&consolePages[h.id]){
+    btns.push(makeButton('Open console',()=>{hideBubble();const dialog=document.createElement('dialog');dialog.style.cssText='width:94vw;height:90vh;padding:0;background:#102026';const close=document.createElement('button');close.textContent='Return to room';close.onclick=()=>dialog.close();const frame=document.createElement('iframe');frame.src=consolePages[h.id];frame.title=h.label;frame.allow='microphone; autoplay';frame.style.cssText='width:100%;height:94%;border:0';dialog.append(close,frame);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();}));
+    btns.push(makeButton('Close',()=>hideBubble()));showBubble(h.label,'Connected production controls',btns,h.at);return;
+  }
   if (a.type === "view") btns.push(makeButton("Open " + h.label, () => { hideBubble(); openCloseup(a.view); }));
   if (live) btns.push(makeButton(a.type === "view" ? "Use it here" : "Use", () => runLive(h, live, null)));
   btns.push(makeButton("Close", () => hideBubble()));

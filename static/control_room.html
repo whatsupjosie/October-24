@@ -58,7 +58,7 @@ body{
 #rec-status-badge{display:inline-block;padding:2px 10px;font-size:10px;letter-spacing:2px;font-weight:700;border-radius:2px;color:#fff}
 </style>
   <script src="/static/reach_auth.js"></script>
-</head>
+<link rel="stylesheet" href="/static/control_room_panel.css"></head>
 <body>
 <nav style="position:fixed;top:10px;left:10px;z-index:200;display:flex;gap:6px;flex-wrap:wrap">
   <a href="/director-switcher" style="background:rgba(0,0,0,.75);border:1px solid var(--brass);color:var(--brass);font-family:Consolas,'Courier New',monospace;font-size:10px;letter-spacing:1px;padding:6px 10px;text-decoration:none">DIRECTOR SWITCHER</a>
@@ -136,7 +136,8 @@ body{
 <div id="station-prompter" class="station-panel hidden"><h3>TELEPROMPTER</h3><textarea id="pro-script" rows="4" placeholder="Paste script hereâ€¦" style="width:100%;resize:vertical;margin-bottom:6px"></textarea><div style="display:flex;gap:8px;align-items:center"><button id="pro-start">START</button><button id="pro-stop">STOP</button><label style="font-size:10px">Speed <input id="pro-speed" type="number" min="1" max="20" value="5" style="width:50px"></label></div></div>
 <div id="station-vtr" class="station-panel hidden"><h3>VTR PLAYBACK</h3><input id="vtr-asset" placeholder="Asset path or URLâ€¦" style="width:100%;margin-bottom:6px"><div style="display:flex;gap:8px"><button id="vtr-load">LOAD</button><button id="vtr-play">PLAY</button><button id="vtr-stop">STOP</button></div></div>
 <div class="hk-bar"><span class="hk">1â€“5</span> CAMERAS Â· <span class="hk">SPACE</span> CUT Â· <span class="hk">R</span> REC Â· <span class="hk">ESC</span> PANIC Â· <span class="hk">M</span> MUTE ALL Â· <span class="hk">D</span> DIRECTOR</div>
-<script src="/static/studio_console_hotspots.js"></script>
+<section data-control-room-panel></section><p><a href="/static/mini_console.html">On-set mini console</a></p>
+<script src="/static/reach_auth.js"></script><script src="/static/studio_console_hotspots.js"></script>
 <script>
 "use strict";
 const CAMS=[{id:'cam1',n:'1',l:'WIDE',sourceId:'wide_shot'},{id:'cam2',n:'2',l:'TWO-SHOT',sourceId:'medium_shot'},{id:'cam3',n:'3',l:'CLOSE',sourceId:'close_up'},{id:'cam4',n:'4',l:'OVERHEAD',sourceId:'overhead'},{id:'cam5',n:'5',l:'STAGE',sourceId:'cam1_ndi'}];
@@ -170,9 +171,9 @@ function updateUI(){
   document.getElementById('srRec').textContent='REC: '+(isRec?'â— ON':'OFF');
   document.getElementById('tRec').className='hotspot rect'+(isRec?' rec-active':'');
 }
-function setPGM(id){pgm=id;updateUI();runStudioAction('camera.switch.program',{source_id:cam(id).sourceId});wsSend({type:'production_state',payload:{camera:id}})}
-function setPVW(id){pvw=id;updateUI();runStudioAction('camera.switch.preview',{source_id:cam(id).sourceId})}
-function cut(){const o=pgm;pgm=pvw;pvw=o;updateUI();runStudioAction('camera.cut',{});wsSend({type:'production_state',payload:{camera:pgm}})}
+async function setPGM(id){if(await runStudioAction('camera.switch.program',{source_id:cam(id).sourceId})){pgm=id;updateUI();}}
+async function setPVW(id){if(await runStudioAction('camera.switch.preview',{source_id:cam(id).sourceId})){pvw=id;updateUI();}}
+async function cut(){if(await runStudioAction('camera.cut',{})){const o=pgm;pgm=pvw;pvw=o;updateUI();}}
 async function toggleRec(){
   if(!isRec){
     const started=await runStudioAction('recording.start',{session_id:`image_console_${Date.now()}`,sources:[cam(pgm).sourceId],profile_id:'broadcast_mp4',countdown_seconds:0},{safety:'confirm',label:'Start recording'});
@@ -185,7 +186,7 @@ async function toggleRec(){
   }
   document.getElementById('hudRec').classList.toggle('on',isRec);document.getElementById('liveTag').style.display=isRec?'block':'none';updateUI()
 }
-function panic(){audioMuted=[true,true,true,true,true];pgm='black';updateUI();runStudioAction('audio.stop_all',{});wsSend({type:'production_state',payload:{camera:'black',on_air:false}})}
+async function panic(){try{await studioActions._fetch('/api/production/panic',{method:'POST'});audioMuted.fill(true);pgm='black';isRec=false;updateUI();}catch(e){document.getElementById('srMode').textContent=e.message;}}
 function muteAll(){audioMuted=[true,true,true,true,true];runStudioAction('audio.stop_all',{});updateUI()}
 function cycleAudio(i){audioMuted[i]=!audioMuted[i];const buses=['dialogue','dialogue','dialogue','music','ui'];runStudioAction('audio.event',{action:audioMuted[i]?'mute':'unmute',bus:buses[i]||'sfx'});updateUI()}
 function setMode(m){mode=m;updateUI();wsSend({type:'signal',payload:{action:'set_director_mode',mode:m}})}
@@ -194,15 +195,15 @@ document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   switch(e.key){case'1':setPGM('cam1');break;case'2':setPGM('cam2');break;case'3':setPGM('cam3');break;case'4':setPGM('cam4');break;case'5':setPGM('cam5');break;case' ':e.preventDefault();cut();break;case'r':case'R':toggleRec();break;case'Escape':panic();break;case'm':case'M':muteAll();break;case'd':case'D':mode=MODES[(MODES.indexOf(mode)+1)%MODES.length];updateUI();break}
 });
-setInterval(()=>{const now=new Date();const tc=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}:${String(Math.floor(Math.random()*30)).padStart(2,'0')}`;document.getElementById('pgmTc').textContent=tc;document.getElementById('pvwTc').textContent=tc.slice(0,8);document.getElementById('chkTc').textContent=tc.slice(0,8);if(isRec){const s=Math.floor((Date.now()-recStart)/1000);document.getElementById('hudTime').textContent=`${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}},250);
+setInterval(()=>{const now=new Date();const tc=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}:--`;document.getElementById('pgmTc').textContent=tc;document.getElementById('pvwTc').textContent=tc.slice(0,8);document.getElementById('chkTc').textContent=tc.slice(0,8);if(isRec){const s=Math.floor((Date.now()-recStart)/1000);document.getElementById('hudTime').textContent=`${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}},250);
 function connectWS(){try{ws=new WebSocket(window.ReachAuth.websocketURL('/ws/controlroom'));ws.onmessage=e=>{try{const m=JSON.parse(e.data);handleWsEvent(m);if(typeof window.__pubcastStationsHook==='function')window.__pubcastStationsHook(m)}catch{}};ws.onclose=()=>setTimeout(connectWS,3000)}catch{}}
 function handleWsEvent(m){
   switch(m.type){
     case 'director_cut':
-      if(m.data?.to_camera) setPGM(m.data.to_camera);
+      if(m.data?.to_camera){pgm=m.data.to_camera;updateUI();}
       break;
     case 'production_state':
-      if(m.payload?.camera) setPGM(m.payload.camera);
+      if(m.payload?.camera){pgm=CAMS.find(c=>c.sourceId===m.payload.camera)?.id||m.payload.camera;updateUI();}
       if(m.payload?.on_air !== undefined){ document.getElementById('liveTag').style.display=m.payload.on_air?'block':'none'; }
       if(m.payload?.mode) { mode=m.payload.mode; updateUI(); }
       break;
@@ -264,5 +265,7 @@ function wsSend(d){if(ws&&ws.readyState===1)ws.send(JSON.stringify(d))}
 updateUI();connectWS();
 </script>
 <script src="control_stations.js"></script>
-</body>
+<script src="/static/control_room_panel.js"></script><script>
+window.addEventListener('pubcast:console-state',e=>{const s=e.detail;pgm=CAMS.find(c=>c.sourceId===s.program)?.id||'black';pvw=CAMS.find(c=>c.sourceId===s.preview)?.id||'';const active=s.sessions.find(x=>['active','paused','countdown'].includes(x.state));isRec=!!active?.capture.running;activeRecordingSessionId=active?.session_id||'';updateUI();});
+</script></body>
 </html>

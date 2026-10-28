@@ -109,7 +109,7 @@ body{font-family:'Courier Prime',monospace;color:var(--cream)}
 
 <script src="/static/reach_auth.js"></script>
 <script type="importmap">
-{"imports":{"three":"https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js"}}
+{"imports":{"three":"/static/vendor/three-0.160.0/build/three.module.js"}}
 </script>
 <script type="module">
 import * as THREE from 'three';
@@ -504,6 +504,20 @@ const CAM_TARGETS = {
   stage:   new THREE.Vector3(0.5, 1, 0),
 };
 
+const CAMERA_NAMES={wide_shot:'wide',medium_shot:'medium',close_up:'close',overhead:'overhead'};
+const pinnedCamera=new URLSearchParams(location.search).get('camera_id');
+const authoritativePoses=new Map();
+function applyCameraPose(p){
+  const name=CAMERA_NAMES[p.source_id]||p.source_id, camera=cameras[name];
+  if(!camera||!Array.isArray(p.position)||!Array.isArray(p.rotation))return;
+  authoritativePoses.set(name,p);
+  camera.position.fromArray(p.position);
+  camera.rotation.set(...p.rotation.map(v=>THREE.MathUtils.degToRad(v)), 'YXZ');
+  camera.fov=p.fov;camera.updateProjectionMatrix();
+  if(camera===activeCam)isTransitioning=false;
+  document.documentElement.dataset.cameraPose=JSON.stringify({name,position:p.position,rotation:p.rotation,fov:p.fov});
+}
+window.PubCastStageCamera={applyCameraPose,getPose:()=>({name:activeCamName,position:activeCam.position.toArray(),rotation:activeCam.rotation.toArray(),fov:activeCam.fov})};
 function switchCamera(name) {
   if (!cameras[name]) return;
   lerpCamFrom.copy(activeCam.position);
@@ -517,6 +531,7 @@ function switchCamera(name) {
   activeCam.fov = cameras[name].fov;
   activeCam.updateProjectionMatrix();
   document.getElementById('camLabel').textContent = 'CAM: ' + name.toUpperCase();
+  if(authoritativePoses.has(name))applyCameraPose(authoritativePoses.get(name));
   buildCamBar();
 }
 window.switchCamera = switchCamera;
@@ -577,9 +592,16 @@ let ws = null;
 const ROOM = new URLSearchParams(location.search).get('room') || 'studio';
 document.getElementById('roomLabel').textContent = 'ROOM: ' + ROOM.toUpperCase();
 
+async function hydrateCameras(){
+  try{const r=await fetch('/api/cameras');if(!r.ok)return;const s=await r.json();
+    s.cameras.filter(c=>['virtual','voxel_3d'].includes(c.transport)).forEach(applyCameraPose);
+    switchCamera(CAMERA_NAMES[pinnedCamera||s.program]||pinnedCamera||s.program);
+  }catch(_){}
+}
 function connectWS() {
   try {
     ws = new WebSocket(window.ReachAuth.websocketURL(`/ws/room/${encodeURIComponent(ROOM)}`));
+    ws.onopen=hydrateCameras;
     ws.onmessage = e => {
       try {
         const msg = JSON.parse(e.data);
@@ -588,10 +610,12 @@ function connectWS() {
         } else if (msg.type === 'history' && msg.payload) {
           msg.payload.forEach(m => addChatMessage(m.user||'Anon', m.text||'', m.user_id));
         } else if (msg.type === 'camera_switch' && msg.payload) {
-          if (msg.payload.target === 'program') {
+          if (!pinnedCamera && msg.payload.target === 'program') {
             const map = {wide_shot:'wide',medium_shot:'medium',close_up:'close',overhead:'overhead'};
             switchCamera(map[msg.payload.source_id] || msg.payload.source_id);
           }
+        } else if (msg.type === 'camera_pose' && msg.payload) {
+          applyCameraPose(msg.payload);
         } else if (msg.type === 'mood_change' && msg.payload) {
           window.setMoodColor(msg.payload.state || 'neutral');
         }

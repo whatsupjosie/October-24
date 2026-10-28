@@ -75,3 +75,21 @@ def test_studio_action_route_rejects_unconfirmed_recording_start(tmp_path: Path)
 
     assert response.status_code == 400
     assert "confirm" in response.json()["detail"]
+
+
+def test_console_state_volume_delivery_and_virtual_motion(tmp_path):
+    client,cameras,_,_=make_client(tmp_path)
+    state=client.get('/api/studio/console-state').json()
+    assert state['program'] and state['cameras'] and 'sessions' in state
+    volume=client.post('/api/studio/actions/audio.event',json={'action':'set_volume','bus':'music','level':0})
+    assert volume.status_code==200
+    result=volume.json()
+    assert result['event']['volume']==0 and result['delivery']=='queued_for_players'
+    assert client.get('/api/studio/console-state').json()['audio']['buses']['music']['volume']==0
+    assert client.post('/api/studio/actions/audio.event',json={'action':'play','bus':'music'}).status_code==400
+    before=list(cameras.get('wide_shot').rotation)
+    moved=client.post('/api/studio/actions/camera.nudge',json={'source_id':'wide_shot','mode':'aim','x':1,'y':0})
+    assert moved.status_code==200 and cameras.get('wide_shot').rotation!=before
+    after=list(cameras.get('wide_shot').rotation)
+    assert client.post('/api/studio/actions/camera.nudge',json={'source_id':'wide_shot','mode':'aim','x':2}).status_code==400
+    assert cameras.get('wide_shot').rotation==after

@@ -277,12 +277,16 @@ def test_sitting_and_the_tv_in_the_green_room(host, signed_in):
     assert page.problems == []
 
 
-def test_hotspots_the_host_has_no_action_for_stay_local(host, signed_in):
+def test_control_room_console_opens_without_leaving_the_walk(host, signed_in):
     page = signed_in
     _open(page, host + "/walk?live=controlroom")
     page.evaluate("() => { const W = window.PubCastWalk; W.showHotspotBubble(W.S.view.hotspots.find(h => h.id === 'director-console')); }")
     assert page.get_by_role("button", name="Use", exact=True).count() == 0
-    assert "Not wired yet" in page.locator("#bubble p").inner_text()
+    assert "Connected production controls" in page.locator("#bubble p").inner_text()
+    page.get_by_role("button",name="Open console",exact=True).click()
+    page.frame_locator("dialog iframe").get_by_role("heading",name="Director Console",exact=True).wait_for()
+    page.get_by_role("button",name="Return to room",exact=True).click()
+    assert page.evaluate("window.PubCastWalk.S.room.id") == "control_room"
     assert page.problems == []
 
 

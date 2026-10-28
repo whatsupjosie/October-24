@@ -1,0 +1,27 @@
+{
+  "director_reference": {
+    "file": "director_reference.png",
+    "sha256": "21b894f3c31887a1abaa32a9962b4298b0cb38153a76222cbd12a9cb1955b778",
+    "source": "User screenshot, preserved without pixel edits"
+  },
+  "mini_console_reference": {
+    "file": "mini_console_reference.png",
+    "sha256": "1a1fb8b113dea869f1e13bff7dbf56462e2d1db2f324133d17e6282cd3f7a096",
+    "source": "User screenshot, preserved without pixel edits"
+  },
+  "slate_reference": {
+    "file": "slate_reference.png",
+    "sha256": "d9fc700917d7afd1c19d89bf136fc65eeb3298c5d52d3eb32dd894bbea761274",
+    "source": "User screenshot, preserved without pixel edits"
+  },
+  "crew_reference": {
+    "file": "crew_reference.png",
+    "sha256": "2da7e2a4a2108425a28e118a7bf2cd39a52bdc2b8afb2853213ed747915803cc",
+    "source": "User screenshot, preserved without pixel edits"
+  },
+  "feic_mo_chroi_reference": {
+    "file": "feic_mo_chroi_reference.png",
+    "sha256": "ee0f0d1b4b0f4f5246593c4b947ec4dc7998b1ed3683171f4466d1fde90b061b",
+    "source": "User screenshot, preserved without pixel edits"
+  }
+}

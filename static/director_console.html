@@ -4,21 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PubCast Director Console</title>
-  <link rel="stylesheet" href="/static/console_hotspot_renderer.css">
+  <link rel="stylesheet" href="/static/console_hotspot_renderer.css"><link rel="stylesheet" href="/static/control_room_panel.css">
 </head>
 <body class="pc-console-page">
   <main class="pc-console-shell">
     <header class="pc-console-topbar">
       <h1 class="pc-console-title">Director Console</h1>
-      <div class="pc-console-meta" data-console-meta>director_console map 1024 x 1024</div>
+      <div class="pc-console-meta" data-console-meta>Leather-chair director console</div>
     </header>
-    <section class="pc-console-mount" data-console-manifest="/static/director_console_hotspot_manifest.json"></section>
+    <img src="/static/console_bg.png" alt="Director’s leather chair and curved console" style="width:100%;height:auto"><p>Physical hotspot mapping awaits the director’s new camera angle. Use the connected controls below.</p><p><a href="/static/mini_console.html">Open on-set mini console</a></p><section data-control-room-panel></section>
     <footer class="pc-console-statusbar">
       <span data-console-status>Loading console...</span>
       <span>Studio actions live</span>
     </footer>
   </main>
+  <script src="/static/reach_auth.js"></script>
   <script src="/static/studio_console_hotspots.js"></script>
-  <script src="/static/console_hotspot_renderer.js"></script>
+  <script src="/static/control_room_panel.js"></script>
 </body>
 </html>

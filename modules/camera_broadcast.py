@@ -16,7 +16,7 @@ import time
 from collections import OrderedDict
 from typing import Any, Optional, Set
 
-from .cameras import CameraManager, CameraSwitchEvent
+from .cameras import CameraManager, CameraSwitchEvent, CameraPoseEvent
 
 logger = logging.getLogger("pubcast.camera_broadcast")
 
@@ -96,6 +96,10 @@ class CameraBroadcastBridge:
         return True
 
     def message(self, event: CameraSwitchEvent) -> dict:
+        if isinstance(event, CameraPoseEvent):
+            return {"type": "camera_pose", "payload": {"source_id": event.source_id,
+                "position": event.position, "rotation": event.rotation, "fov": event.fov,
+                "timestamp": event.timestamp, "event_id": event.event_id}}
         snapshot = self.cameras.snapshot()
         return {
             "type": "camera_switch",
@@ -113,7 +117,7 @@ class CameraBroadcastBridge:
     def _on_event(self, event: Any, *, generation: Optional[int] = None) -> None:
         loop = self._loop
         generation = self._generation if generation is None else generation
-        if (not isinstance(event, CameraSwitchEvent) or self.hub is None
+        if (not isinstance(event, (CameraSwitchEvent, CameraPoseEvent)) or self.hub is None
                 or loop is None or not self.running or generation != self._generation):
             return
         # Capture the state at the change, before a worker queues delivery.
