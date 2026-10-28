@@ -16,6 +16,9 @@ Ledger: `handoffs/SAVING_2026-10-28.md`.
 - **Counter layout** is now also kept on the host per owner (`/api/foresight/counter-layout`), and the newer copy is used on start. It comes back after a restart in a fresh browser. `tests/test_foresight_counter_layout_host.py`: 9 passed.
 - **PubPartner cartridges:** File › New cartridge… makes a real cartridge (`init_cartridge`, proved with `load_cartridge`) in `data/pubpartner/cartridges/`. It becomes a friend you can talk to, and it can have an avatar from the library. The Alex vessel is untouched. `tests/test_pubpartner_cartridges.py`: 8 passed.
 - **PubPartner menus were unusable:** the top bar's clip-path hid every drop-down. They now show and click; the bar's design is unchanged. `tests/test_pubpartner_menus_browser.py`: 2 passed.
+- **Full suite after all of this** (Python 3.12, 120 s limit per test): 1,981 passed, 5 failed, 3 skipped. Before: 1,938 passed, 17 failed, 0 errors on 2026-10-27, and 1,798 passed, 15 failed, 2 errors on clean `022d9ec`.
+  - 4 of the 5 are the known `test_foresight_airgapped_ui.py` tray-admission timeouts, the same as on clean October-24.
+  - The 5th, `test_foresight_file_workspace.py::test_python_syntax_check_in_native_editor_without_external_services`, timed out in the browser during the full run. It passed three times out of three on its own. It is load-sensitive, not fixed.
 - **Every save survives a restart:** `tests/test_saves_survive_restart.py` saves a 2i document, a workspace file, a PubPartner session and turn, a conversation, a chat message, an avatar, a cartridge, studio progress and the Counter layout, then quits and restarts `run_reach.py` and reads each one back: 1 passed. DMs are not covered yet.
 
 ## 2026-10-27: Bella Faux Pas Studio (walkable world) integrated
