@@ -27,6 +27,7 @@ class CameraBroadcastBridge:
         self.hub = hub
         self._token: Optional[int] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._generation = 0
         self._tasks: Set[asyncio.Task] = set()
         self._seen_event_ids: "OrderedDict[str, None]" = OrderedDict()
         self.max_event_cache = 1000
@@ -40,28 +41,45 @@ class CameraBroadcastBridge:
         """Subscribe from inside the running event loop (the app lifespan)."""
         if self._token is not None:
             return
+        if any(not task.done() for task in self._tasks):
+            raise RuntimeError("camera bridge still has unfinished shutdown tasks")
+        self._tasks.clear()
+        self._generation += 1
         self._loop = asyncio.get_running_loop()
-        self._token = self.cameras.subscribe(self._on_event)
+        generation = self._generation
+        self._token = self.cameras.subscribe(
+            lambda event: self._on_event(event, generation=generation)
+        )
         if self.hub is not None:
             setattr(self.hub, "camera_events_bridged", True)
 
     async def stop(self, timeout: float = 5.0) -> None:
+        """Cancel deliveries and wait for cleanup; retain and report any stragglers.
+
+        Python cannot forcibly finish a coroutine that suppresses cancellation.
+        A timed-out stop therefore raises instead of claiming a clean shutdown.
+        Calling stop again can finish cleanup; start refuses while tasks remain.
+        """
+        if timeout < 0:
+            raise ValueError("shutdown timeout must be nonnegative")
+        self._generation += 1
+        self._loop = None
         if self._token is not None:
             self.cameras.unsubscribe(self._token)
             self._token = None
         if self.hub is not None and getattr(self.hub, "camera_events_bridged", False):
             setattr(self.hub, "camera_events_bridged", False)
 
+        self._seen_event_ids.clear()
+        self._tasks.difference_update(task for task in tuple(self._tasks) if task.done())
         pending = [task for task in self._tasks if not task.done()]
         if pending:
             for task in pending:
                 task.cancel()
-            done, pending = await asyncio.wait(pending, timeout=timeout, return_when=asyncio.ALL_COMPLETED)
-            for task in pending:
-                task.cancel()
-            self._tasks = {task for task in done if task not in pending}
-        self._tasks.clear()
-        self._seen_event_ids.clear()
+            done, pending = await asyncio.wait(pending, timeout=timeout)
+            self._tasks.difference_update(done)
+            if pending:
+                raise TimeoutError(f"{len(pending)} camera broadcast task(s) did not stop")
 
     def _dedupe_event(self, event: CameraSwitchEvent) -> bool:
         event_id = getattr(event, "event_id", None)
@@ -90,15 +108,25 @@ class CameraBroadcastBridge:
             },
         }
 
-    def _on_event(self, event: Any) -> None:
-        if not isinstance(event, CameraSwitchEvent) or self.hub is None or self._loop is None:
+    def _on_event(self, event: Any, *, generation: Optional[int] = None) -> None:
+        loop = self._loop
+        generation = self._generation if generation is None else generation
+        if (not isinstance(event, CameraSwitchEvent) or self.hub is None
+                or loop is None or not self.running or generation != self._generation):
             return
-        if not self._dedupe_event(event):
-            return
+        # Capture the state at the change, before a worker queues delivery.
         message = self.message(event)
 
         def schedule() -> None:
-            task = self._loop.create_task(self._send(message))
+            # A thread may have queued this immediately before stop, or even
+            # before a stop/start cycle. Old subscriptions never send again.
+            if (not self.running or self._loop is not loop
+                    or generation != self._generation):
+                return
+            # Cache mutations and task bookkeeping belong to the owning loop.
+            if not self._dedupe_event(event):
+                return
+            task = loop.create_task(self._send(message))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
@@ -106,10 +134,15 @@ class CameraBroadcastBridge:
             running = asyncio.get_running_loop()
         except RuntimeError:
             running = None
-        if running is self._loop:
+        if running is loop:
             schedule()
-        elif not self._loop.is_closed():
-            self._loop.call_soon_threadsafe(schedule)
+        elif not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(schedule)
+            except RuntimeError:
+                # The loop can close between is_closed and enqueueing.
+                if not loop.is_closed():
+                    raise
 
     async def _send(self, message: dict) -> None:
         try:

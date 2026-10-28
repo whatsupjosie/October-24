@@ -898,8 +898,13 @@ async def lifespan(application: FastAPI):
             yield
         finally:
             application.state._pubcast_lifespan_users = 0
+            camera_shutdown_error = None
             if rearmed_camera_broadcast is not None:
-                await rearmed_camera_broadcast.stop()
+                try:
+                    await rearmed_camera_broadcast.stop()
+                except TimeoutError as exc:
+                    camera_shutdown_error = exc
+                    logger.error("Camera broadcast shutdown incomplete; continuing other cleanup", exc_info=True)
             if evo_orchestrator is not None:
                 await evo_orchestrator.stop()
             if rearmed_conductor is not None:
@@ -923,6 +928,8 @@ async def lifespan(application: FastAPI):
                     await rearmed_system_memory.close()
                 except Exception:
                     logger.debug("Re-entrant SystemMemory shutdown failed", exc_info=True)
+            if camera_shutdown_error is not None:
+                raise camera_shutdown_error
         return
     application.state._pubcast_booted = True
 
@@ -1864,8 +1871,13 @@ async def lifespan(application: FastAPI):
     # — Shutdown —
     logger.info("— PubCast AI shutting down —")
     _camera_broadcast = getattr(application.state, "camera_broadcast", None)
+    camera_shutdown_error = None
     if _camera_broadcast is not None:
-        await _camera_broadcast.stop()
+        try:
+            await _camera_broadcast.stop()
+        except TimeoutError as exc:
+            camera_shutdown_error = exc
+            logger.error("Camera broadcast shutdown incomplete; continuing other cleanup", exc_info=True)
     # Stop only processes started through this authenticated host boundary.
     _stop_shells = getattr(application.state, "foresight_stop_sessions", None)
     if callable(_stop_shells):
@@ -1915,6 +1927,8 @@ async def lifespan(application: FastAPI):
         await cricket_keeper.close_all()
     if blackbox_witness is not None:
         blackbox_witness.close()
+    if camera_shutdown_error is not None:
+        raise camera_shutdown_error
     logger.info("— PubCast AI stopped —")
 
 

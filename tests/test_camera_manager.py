@@ -94,7 +94,7 @@ async def test_broadcast_bridge_deduplicates_event_ids():
 
     hub = FakeHub()
     bridge = CameraBroadcastBridge(manager, hub)
-    bridge._loop = asyncio.get_running_loop()
+    bridge.start()
 
     event = CameraSwitchEvent("program", "cam_b", "cam_a", time.time(), "evt-1")
     bridge._on_event(event)
@@ -104,6 +104,7 @@ async def test_broadcast_bridge_deduplicates_event_ids():
 
     assert len(hub.messages) == 1
     assert hub.messages[0]["payload"]["event_id"] == "evt-1"
+    await bridge.stop()
 
 
 def test_snapshot_state_is_stable():
@@ -175,6 +176,7 @@ async def test_bridge_stop_reaps_stuck_tasks():
 
     assert bridge.running is False
     assert bool(bridge._tasks) is False
+    assert task.done() and task.cancelled()
 
 
 @pytest.mark.asyncio

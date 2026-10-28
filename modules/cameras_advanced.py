@@ -455,6 +455,11 @@ class CameraSource:
         """Start a real ffmpeg raw-frame capture pipeline for supported transports."""
         if self.is_capturing:
             return True
+        previous_task = getattr(self, "capture_task", None)
+        if previous_task is not None and not previous_task.done():
+            self.metadata.status = CameraStatus.ERROR
+            self.metadata.error_message = "Previous capture worker is still shutting down"
+            return False
         input_args = self._capture_input_args()
         if input_args is None:
             self.metadata.status = CameraStatus.ERROR
@@ -539,19 +544,38 @@ class CameraSource:
                             stream.close()
             self.is_capturing = False
 
-    async def stop_capture(self):
-        """Stop capturing frames and terminate the owned ffmpeg process."""
+    async def stop_capture(self, timeout: float = 3.0):
+        """Wait for the worker to reap ffmpeg and close its pipes before returning.
+
+        The executor future must never be cancelled: cancelling it does not stop
+        its thread and would allow a second capture to start over the old worker.
+        """
+        if timeout < 0:
+            raise ValueError("capture shutdown timeout must be nonnegative")
         self.is_capturing = False
         proc = self.capture_process
         if proc is not None and proc.poll() is None:
-            proc.terminate()
-        if hasattr(self, "capture_task"):
             try:
-                await asyncio.wait_for(asyncio.shield(self.capture_task), timeout=3.0)
-            except asyncio.TimeoutError:
+                proc.terminate()
+            except ProcessLookupError:
+                pass  # The worker reaped it between poll and terminate.
+        task = getattr(self, "capture_task", None)
+        if task is not None:
+            _, pending = await asyncio.wait({task}, timeout=timeout)
+            if pending:
                 proc = self.capture_process
                 if proc is not None and proc.poll() is None:
-                    proc.kill()
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                _, pending = await asyncio.wait({task}, timeout=timeout)
+                if pending:
+                    self.metadata.status = CameraStatus.ERROR
+                    self.metadata.error_message = "Capture worker did not stop after ffmpeg termination"
+                    raise TimeoutError(self.metadata.error_message)
+            # Propagate unexpected worker cleanup failures instead of reporting OFFLINE.
+            task.result()
         self.metadata.status = CameraStatus.OFFLINE
         logger.info("Stopped capture for camera %s", self.id)
 
