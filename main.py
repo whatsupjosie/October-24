@@ -1976,6 +1976,9 @@ from modules.studio_progress import create_studio_progress_router  # noqa: E402
 app.include_router(create_studio_progress_router(DATA_DIR))
 from modules.counter_layout import create_counter_layout_router  # noqa: E402
 app.include_router(create_counter_layout_router(DATA_DIR))
+# New PubPartner cartridges (pubpartner/cartridge.py init_cartridge), each registered as a friend; never the Alex vessel.
+from modules.pubpartner_cartridges import create_pubpartner_cartridge_router  # noqa: E402
+app.include_router(create_pubpartner_cartridge_router(DATA_DIR))
 app.state.foresight_stop_sessions = _foresight_host_tools.stop_owned_sessions
 
 

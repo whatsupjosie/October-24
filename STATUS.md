@@ -14,7 +14,9 @@ Ledger: `handoffs/SAVING_2026-10-28.md`.
   - The studio can wear avatars from the avatar library.
   - `tests/test_bella_faux_pas_progress.py` quits and restarts `run_reach.py` and checks that all of it comes back: 11 passed.
 - **Counter layout** is now also kept on the host per owner (`/api/foresight/counter-layout`), and the newer copy is used on start. It comes back after a restart in a fresh browser. `tests/test_foresight_counter_layout_host.py`: 9 passed.
-- **Not done yet:** cartridge creation in PubPartner, and one restart test across every save.
+- **PubPartner cartridges:** File › New cartridge… makes a real cartridge (`init_cartridge`, proved with `load_cartridge`) in `data/pubpartner/cartridges/`. It becomes a friend you can talk to, and it can have an avatar from the library. The Alex vessel is untouched. `tests/test_pubpartner_cartridges.py`: 8 passed.
+- **PubPartner menus were unusable:** the top bar's clip-path hid every drop-down. They now show and click; the bar's design is unchanged. `tests/test_pubpartner_menus_browser.py`: 2 passed.
+- **Not done yet:** one restart test across every save.
 
 ## 2026-10-27: Bella Faux Pas Studio (walkable world) integrated
 

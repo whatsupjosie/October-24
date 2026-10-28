@@ -422,3 +422,16 @@ html[data-theme="emerald"]{--gold:#9fe3b7;--muted:#b8cdbd;--panel:rgba(12,31,22,
 html[data-theme="violet"]{--gold:#e8b0ff;--muted:#c8b2cf;--panel:rgba(40,20,43,.86);--panel-strong:rgba(28,12,31,.96);--glow:0 0 25px rgba(180,84,229,.18)}html[data-theme="violet"] body{background:radial-gradient(circle at 15% 10%,#5b2b35,transparent 34%),linear-gradient(145deg,#10080f,#211027)}
 html[data-motion="reduced"] *,html[data-motion="reduced"] *::before,html[data-motion="reduced"] *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 @media(max-width:760px){.menu-strip{min-width:0}.menu-root{flex:0 0 auto}.menu-pop{position:fixed;left:12px!important;right:12px!important;top:92px;max-height:65vh;overflow:auto}.desk .panel[data-panel]{position:relative!important;left:auto!important;top:auto!important;width:calc(100vw - 24px)!important;height:auto!important;min-height:180px;margin:12px}.desk{display:block;height:auto!important;padding-top:12px}.app-shell{min-width:0!important}.fan-menu{position:relative!important;left:auto!important;top:auto!important;margin:12px;width:calc(100vw - 24px)}.bottombar{position:relative!important;flex-wrap:wrap}.tools,.wardrobe,.setup-dock,.debug-drawer,.knowledge-dock{display:block!important}}
+
+/* New cartridge dialog (shares the sign-in card) */
+.auth-card select, .auth-card textarea {
+  width: 100%; box-sizing: border-box; border: 1px solid rgba(203, 165, 255, .34); border-radius: 12px;
+  background: rgba(5, 8, 16, .66); color: #fff8ec; padding: 12px 13px; outline: none; font: inherit; resize: vertical;
+}
+.auth-card select:focus, .auth-card textarea:focus { border-color: #f0b95e; box-shadow: 0 0 0 3px rgba(240, 185, 94, .14); }
+.auth-card a { color: #f3bd63; }
+#cartridgeGate[data-mode="avatar"] .cartridge-new { display: none; }
+
+/* An open menu is moved outside the clipped top bar (see floatMenu in pubpartner.js); it keeps the same look */
+.menu-pop.floating{display:grid;gap:3px;position:fixed;z-index:9000}
+.menu-pop.floating button{box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 5px 15px rgba(0,0,0,.18)}

@@ -14,6 +14,10 @@ on:
       - 'modules/pubworld_hotspots.py'
       - 'modules/studio_progress.py'
       - 'modules/counter_layout.py'
+      - 'modules/pubpartner_cartridges.py'
+      - 'static/pubpartner*'
+      - 'tests/test_pubpartner_cartridges.py'
+      - 'tests/test_pubpartner_menus_browser.py'
       - 'tests/test_foresight_counter_layout_host.py'
       - 'data/world/**'
       - 'tools/build_world_json.py'
@@ -66,6 +70,7 @@ jobs:
             tests/test_pubcast_world.py tests/test_pubcast_world_placement.py tests/test_pubcast_world_json.py \
             tests/test_world_walk_browser.py tests/test_world_walk_glb_browser.py \
             tests/test_world_walk_host_integration.py tests/test_bella_faux_pas_launch_acceptance.py tests/test_bella_faux_pas_progress.py tests/test_foresight_counter_layout_host.py \
+            tests/test_pubpartner_cartridges.py tests/test_pubpartner_menus_browser.py \
             tests/test_00_integrity.py tests/test_02_routing.py tests/test_foresight_front_door.py tests/test_no_user_audit.py \
             --junitxml=bella-faux-pas-junit.xml
       - name: Upload test results

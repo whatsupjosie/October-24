@@ -28,6 +28,25 @@
       <p class="auth-foot">PubPartner binds locally by default. Your model provider settings remain separate from this owner login.</p>
     </div>
   </div>
+  <div class="auth-gate" id="cartridgeGate" role="dialog" aria-modal="true" aria-labelledby="cartridgeTitle" hidden>
+    <div class="auth-card panel-glow">
+      <div class="auth-lantern" aria-hidden="true">✦</div>
+      <p class="auth-kicker">Saved on this PubCast</p>
+      <h2 id="cartridgeTitle">New cartridge</h2>
+      <p id="cartridgeCopy">A new friend, saved as a portable cartridge. You can talk to them as soon as it is made.</p>
+      <form id="cartridgeForm" autocomplete="off">
+        <label class="cartridge-new">Name<input id="cartridgeName" maxlength="80" required /></label>
+        <label class="cartridge-new">Who they are<textarea id="cartridgeSummary" maxlength="480" rows="3" required></textarea></label>
+        <label class="cartridge-new">How they talk<input id="cartridgeCadence" maxlength="200" placeholder="natural" /></label>
+        <label class="cartridge-new">Words they use<input id="cartridgeVocabulary" maxlength="200" placeholder="everyday" /></label>
+        <label>Avatar<select id="cartridgeAvatar"><option value="">No avatar</option></select></label>
+        <p class="auth-hint"><a href="/static/avatar_import.html" target="_blank" rel="noopener">Add an avatar to your library…</a></p>
+        <p class="auth-error" id="cartridgeError" aria-live="polite"></p>
+        <button id="cartridgeSubmit" type="submit">Create cartridge</button>
+        <button id="cartridgeCancel" type="button">Cancel</button>
+      </form>
+    </div>
+  </div>
   <div class="ambient-lantern ambient-left" aria-hidden="true"></div>
   <div class="ambient-lantern ambient-right" aria-hidden="true"></div>
   <div class="app-shell" id="appShell">
@@ -41,7 +60,7 @@
       </div>
       <nav class="menu-strip" aria-label="Primary menu">
         <div class="menu-root"><button type="button" data-menu="file" aria-haspopup="menu" aria-expanded="false">File</button><div class="menu-pop" role="menu">
-          <button role="menuitem" data-command="new-session">New session</button><button role="menuitem" data-command="backup-friend">Back up my friend</button>
+          <button role="menuitem" data-command="new-session">New session</button><button role="menuitem" data-command="new-cartridge">New cartridge…</button><button role="menuitem" data-command="backup-friend">Back up my friend</button>
           <button role="menuitem" data-command="save-workspace">Save workspace</button><button role="menuitem" data-command="import-layout">Import layout…</button><button role="menuitem" data-command="export-layout">Export layout…</button>
         </div></div>
         <div class="menu-root"><button type="button" data-menu="edit" aria-haspopup="menu" aria-expanded="false">Edit</button><div class="menu-pop" role="menu">
@@ -58,7 +77,7 @@
           <button role="menuitem" data-command="focus-tools">Trust controls</button><button role="menuitem" data-command="verify-receipts">Verify receipts</button><button role="menuitem" data-command="restore-source">Restore exact source</button><button role="menuitem" data-command="provider-test">Provider diagnostic</button><button role="menuitem" data-command="preflight">Run preflight</button>
         </div></div>
         <div class="menu-root"><button type="button" data-menu="wardrobe" aria-haspopup="menu" aria-expanded="false">Wardrobe</button><div class="menu-pop" role="menu">
-          <button role="menuitem" data-command="focus-preview">Avatar preview</button><button role="menuitem" data-command="focus-setup">Companion selection</button>
+          <button role="menuitem" data-command="focus-preview">Avatar preview</button><button role="menuitem" data-command="focus-setup">Companion selection</button><button role="menuitem" data-command="cartridge-avatar">Choose avatar…</button>
         </div></div>
         <div class="menu-root"><button type="button" data-menu="memory" aria-haspopup="menu" aria-expanded="false">Memory</button><div class="menu-pop" role="menu">
           <button role="menuitem" data-command="focus-memory">What we’ve learned</button><button role="menuitem" data-command="refresh-relationship">Refresh relationship</button><button role="menuitem" data-command="show-encounters">Evidence encounters</button><button role="menuitem" data-command="show-guidance">Guidance and corrections</button>

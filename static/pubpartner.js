@@ -176,6 +176,7 @@
         }
         appStarted = true;
         startLivingTelemetry();
+        refreshCartridges();
         refreshZenCredentials(false);
         refreshProviderCredentials(false);
         return true;
@@ -1021,11 +1022,84 @@
 
   const CommandRegistry = new Map();
   function registerCommand(name, handler) { CommandRegistry.set(name, handler); }
+
+  // ---------- cartridges: new friends made here and kept on the host (modules/pubpartner_cartridges.py)
+  let cartridges = [];
+  function addFriendOption(c) {
+    const sel = $('friendId');
+    let opt = [...sel.options].find((o) => o.value === c.id);
+    if (!opt) { opt = document.createElement('option'); opt.value = c.id; sel.appendChild(opt); }
+    opt.textContent = c.name || c.id; opt.dataset.cartridge = '1';
+  }
+  async function refreshCartridges() {
+    try { const r = await api('/api/pubpartner/cartridges'); cartridges = r.cartridges || []; cartridges.forEach(addFriendOption); }
+    catch (error) { toast('Could not load your cartridges: ' + error.message); }
+  }
+  async function fillAvatarChoices(selected) {
+    const sel = $('cartridgeAvatar');
+    sel.replaceChildren(new Option('No avatar', ''));
+    try {
+      const r = await api('/api/avatars/imports');
+      for (const a of r.avatars || []) sel.appendChild(new Option(a.name || a.id, a.id));
+    } catch (error) { $('cartridgeError').textContent = 'Avatar library unavailable: ' + error.message; }
+    sel.value = selected || '';
+  }
+  async function openCartridgeGate(mode) {
+    const gate = $('cartridgeGate'), current = cartridges.find((c) => c.id === $('friendId').value);
+    if (mode === 'avatar' && !current) return toast('Pick a cartridge friend first. Built-in friends keep their own look.');
+    gate.dataset.mode = mode; $('cartridgeError').textContent = '';
+    $('cartridgeTitle').textContent = mode === 'avatar' ? 'Avatar for ' + (current.name || current.id) : 'New cartridge';
+    $('cartridgeSubmit').textContent = mode === 'avatar' ? 'Save avatar' : 'Create cartridge';
+    $('cartridgeCopy').textContent = mode === 'avatar' ? 'Choose from your avatar library. The Bella Faux Pas Studio uses the same library.'
+      : 'A new friend, saved as a portable cartridge. You can talk to them as soon as it is made.';
+    if (mode !== 'avatar') ['cartridgeName', 'cartridgeSummary', 'cartridgeCadence', 'cartridgeVocabulary'].forEach((id) => { $(id).value = ''; });
+    $('cartridgeName').required = $('cartridgeSummary').required = mode !== 'avatar';
+    gate.hidden = false;
+    await fillAvatarChoices(mode === 'avatar' ? current.avatar_id : '');
+    (mode === 'avatar' ? $('cartridgeAvatar') : $('cartridgeName')).focus();
+  }
+  async function submitCartridge(event) {
+    event.preventDefault();
+    const gate = $('cartridgeGate'), button = $('cartridgeSubmit');
+    button.disabled = true; $('cartridgeError').textContent = '';
+    try {
+      let c;
+      if (gate.dataset.mode === 'avatar') {
+        const id = $('friendId').value;
+        c = (await api(`/api/pubpartner/cartridges/${encodeURIComponent(id)}/avatar`, { method: 'PUT', body: JSON.stringify({ avatar_id: $('cartridgeAvatar').value || null }) })).cartridge;
+        toast(c.avatar_id ? `Avatar saved for ${c.name}.` : `${c.name} has no avatar now.`);
+      } else {
+        c = (await api('/api/pubpartner/cartridges', { method: 'POST', body: JSON.stringify({
+          name: $('cartridgeName').value, summary: $('cartridgeSummary').value, cadence: $('cartridgeCadence').value,
+          vocabulary: $('cartridgeVocabulary').value, avatar_id: $('cartridgeAvatar').value || null }) })).cartridge;
+        toast(`${c.name} is saved as a cartridge. Say hello.`);
+      }
+      cartridges = cartridges.filter((x) => x.id !== c.id).concat([c]);
+      addFriendOption(c);
+      if ($('friendId').value !== c.id) { $('friendId').value = c.id; $('friendId').dispatchEvent(new Event('change')); }
+      gate.hidden = true;
+    } catch (error) { $('cartridgeError').textContent = error.message; }
+    finally { button.disabled = false; }
+  }
   async function runCommand(name) { const handler=CommandRegistry.get(name); if (!handler) return toast(`Command not available: ${name}`); try { await handler(); } catch (error) { toast(`${name} failed: ${error.message}`); } }
-  function closeMenus() { document.querySelectorAll('.menu-root.open').forEach((root) => { root.classList.remove('open'); root.querySelector('[data-menu]')?.setAttribute('aria-expanded','false'); }); }
+  // The top bar's notched shape is a clip-path, which also hides anything that drops out below it, so an open menu
+  // is shown outside the bar (fixed, under its button) and put back when it closes. The bar itself is unchanged.
+  function floatMenu(root) {
+    const pop = root.querySelector('.menu-pop'); if (!pop) return null;
+    const r = root.getBoundingClientRect();
+    pop.__home = root; document.body.appendChild(pop); pop.classList.add('floating');
+    pop.style.top = (r.bottom + 7) + 'px';
+    if (pop.classList.contains('menu-pop-right')) { pop.style.left = 'auto'; pop.style.right = Math.max(0, innerWidth - r.right) + 'px'; }
+    else pop.style.left = r.left + 'px';
+    return pop;
+  }
+  function closeMenus() {
+    document.querySelectorAll('.menu-pop.floating').forEach((pop) => { pop.classList.remove('floating'); pop.style.top = pop.style.left = pop.style.right = ''; pop.__home?.appendChild(pop); });
+    document.querySelectorAll('.menu-root.open').forEach((root) => { root.classList.remove('open'); root.querySelector('[data-menu]')?.setAttribute('aria-expanded','false'); });
+  }
   function enablePanelFocus() {
     WorkspaceRuntime.panels().forEach((panel) => panel.addEventListener('pointerdown', () => { panel.style.zIndex=String(++zTop); }, {passive:true}));
-    document.querySelectorAll('[data-menu]').forEach((btn) => btn.addEventListener('click', (e) => { e.stopPropagation(); const root=btn.closest('.menu-root'), opening=!root.classList.contains('open'); closeMenus(); if (opening) { root.classList.add('open'); btn.setAttribute('aria-expanded','true'); root.querySelector('[role="menuitem"]')?.focus(); } }));
+    document.querySelectorAll('[data-menu]').forEach((btn) => btn.addEventListener('click', (e) => { e.stopPropagation(); const root=btn.closest('.menu-root'), opening=!root.classList.contains('open'); closeMenus(); if (opening) { root.classList.add('open'); btn.setAttribute('aria-expanded','true'); floatMenu(root)?.querySelector('[role="menuitem"]')?.focus(); } }));
     document.querySelectorAll('.menu-pop').forEach((pop) => pop.addEventListener('click',(e)=>e.stopPropagation())); document.addEventListener('click',closeMenus);
     document.querySelectorAll('[data-command]').forEach((btn)=>btn.addEventListener('click',()=>{closeMenus();runCommand(btn.dataset.command);}));
     document.querySelectorAll('[data-theme-value]').forEach((btn)=>btn.addEventListener('click',()=>{closeMenus();setTheme(btn.dataset.themeValue,true);}));
@@ -1038,7 +1112,7 @@
     const focus=(name)=>()=>{focusPanel(name);document.querySelector(`.panel[data-panel="${name}"]`)?.scrollIntoView({behavior:document.documentElement.dataset.motion==='reduced'?'auto':'smooth',block:'center',inline:'center'});};
     registerCommand('new-session',()=>$('newSession').click()); registerCommand('backup-friend',backupFriend); registerCommand('save-workspace',()=>WorkspaceRuntime.save(true)); registerCommand('import-layout',()=>$('layoutImport').click()); registerCommand('export-layout',()=>WorkspaceRuntime.exportLayout()); registerCommand('undo-layout',()=>WorkspaceRuntime.undo()); registerCommand('reset-layout',()=>WorkspaceRuntime.reset()); registerCommand('compact-layout',()=>WorkspaceRuntime.compact()); registerCommand('toggle-motion',()=>{setMotion(document.documentElement.dataset.motion==='reduced'?'full':'reduced');toast(document.documentElement.dataset.motion==='reduced'?'Reduced motion enabled.':'Full motion enabled.');}); registerCommand('toggle-customize',toggleCustomize);
     for (const name of ['conversation','preview','files','output','status','tools','knowledge','setup']) registerCommand(`focus-${name}`,focus(name)); registerCommand('focus-memory',focus('wardrobe'));
-    registerCommand('verify-receipts',verifyReceipts); registerCommand('restore-source',restoreSource); registerCommand('provider-test',providerTest); registerCommand('preflight',runPreflight); registerCommand('refresh-relationship',()=>refreshRelationship(true)); registerCommand('show-encounters',()=>refreshRelationship(true)); registerCommand('show-guidance',showGuidance);
+    registerCommand('verify-receipts',verifyReceipts); registerCommand('restore-source',restoreSource); registerCommand('provider-test',providerTest); registerCommand('preflight',runPreflight); registerCommand('refresh-relationship',()=>refreshRelationship(true)); registerCommand('show-encounters',()=>refreshRelationship(true)); registerCommand('show-guidance',showGuidance); registerCommand('new-cartridge',()=>openCartridgeGate('new')); registerCommand('cartridge-avatar',()=>openCartridgeGate('avatar'));
   }
 
   function toggleCustomize() {
@@ -1119,6 +1193,8 @@
     $('modelName').placeholder = 'Exact model ID available to your account';
     $('providerLabel').textContent = provider;
   });
+  $('cartridgeForm').addEventListener('submit', submitCartridge);
+  $('cartridgeCancel').addEventListener('click', () => { $('cartridgeGate').hidden = true; });
   const authForm = $('authForm'); if (authForm) authForm.addEventListener('submit', submitAuth);
   const accountButton = $('accountButton'); if (accountButton) accountButton.addEventListener('click', toggleAccount);
   $('friendId').addEventListener('change', () => { resetChat(); sessionOpened = false; });
