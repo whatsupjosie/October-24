@@ -38,6 +38,7 @@ class Hub:
         self.eq_monitoring_recorder = None  # Optional development evidence recorder.
         self.dm_authorizer = None  # Bound to persistent consent by chat route install.
         self._chat_commit_store = None  # Lazy, installation-local SQLite receipts.
+        self.camera_send_timeout = 2.0  # Drop stalled displays; camera cuts must keep moving.
 
     def get_production_state(self) -> Dict[str, Any]:
         return read_json(self.prod_file)
@@ -130,8 +131,16 @@ class Hub:
         }
 
     async def broadcast_system_event(self, event: Dict[str, Any]):
-        for room, conns in self.rooms.items():
-            await self._broadcast(room, event)
+        rooms = list(self.rooms)
+        if event.get("type") == "camera_switch":
+            visited = set()
+            # A slow room or display must not hold every other camera display.
+            await asyncio.gather(*(self._broadcast(room, event, send_timeout=self.camera_send_timeout,
+                                                   visited=visited)
+                                   for room in rooms))
+        else:
+            for room in rooms:
+                await self._broadcast(room, event)
 
     async def send_private_event(self, user_ids: Set[str], event: Dict[str, Any]) -> int:
         """Deliver a private notification only to verified sockets of its addressees.
@@ -274,30 +283,58 @@ class Hub:
             logger.exception("Private room authorization unavailable; denying outgoing frame")
             return False
 
-    async def _broadcast(self, room: str, msg: Dict[str, Any]):
+    async def _broadcast(self, room: str, msg: Dict[str, Any], *, send_timeout=None, visited=None):
         dead: List[WebSocket] = []
         revoked: List[WebSocket] = []
+        slow: List[WebSocket] = []
         wire = json.dumps(msg)
         private = room.startswith(("dm____", "dmv2_"))
-        for ws in list(self.rooms.get(room, set())):
+        async def deliver(ws):
             meta = self._ws_meta.get(id(ws))
             # A revocation on another server worker must not leave this worker
             # broadcasting new private frames to an old authorized socket.
             # Fail closed if the local authorizer was never wired.
             if private and not self._dm_recipient_authorized(meta):
                 revoked.append(ws)
-                continue
+                return
+            if visited is not None:
+                key = id(ws)
+                if key in visited:
+                    return
+                visited.add(key)
             try:
                 if ws.application_state == WebSocketState.CONNECTED:
-                    await ws.send_text(wire)
+                    if send_timeout is None:
+                        await ws.send_text(wire)
+                    else:
+                        await asyncio.wait_for(ws.send_text(wire), timeout=send_timeout)
                 else:
                     dead.append(ws)
+            except asyncio.TimeoutError:
+                slow.append(ws)
+                dead.append(ws)
+                logger.warning("hub: evicting slow camera display in room=%s", room)
             except Exception as exc:
                 logger.debug("hub: broadcast send failed to client in room=%s: %s", room, exc)
                 dead.append(ws)
+        sockets = list(self.rooms.get(room, set()))
+        if send_timeout is None:
+            for ws in sockets:
+                await deliver(ws)
+        else:
+            await asyncio.gather(*(deliver(ws) for ws in sockets))
         for ws in dead:
-            self.rooms.get(room, set()).discard(ws)
+            if send_timeout is None:
+                self.rooms.get(room, set()).discard(ws)
+            else:
+                for peers in self.rooms.values():
+                    peers.discard(ws)
             self._ws_meta.pop(id(ws), None)
+        for ws in slow:
+            try:
+                await asyncio.wait_for(ws.close(code=1013), timeout=send_timeout)
+            except Exception:
+                logger.debug("hub: stalled display close failed", exc_info=True)
         for ws in revoked:
             if ws in self.rooms.get(room, set()):
                 await self.disconnect(ws, room)

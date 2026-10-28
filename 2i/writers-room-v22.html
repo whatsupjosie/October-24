@@ -1183,17 +1183,26 @@ function defaultLLM() {
 }
 function loadLLM() {
   try {
-    const raw = localStorage.getItem(LLM_KEY);
+    const raw = sessionStorage.getItem(LLM_KEY) || localStorage.getItem(LLM_KEY);
     if (!raw) return defaultLLM();
     const p = JSON.parse(raw), d = defaultLLM();
     const m = Object.assign({}, d, p);
     for (const k of ['claude','openai','local','pubpartner']) m[k] = Object.assign({}, d[k], p[k] || {});
     // Migrate the stale original-host setting; keep intentionally selected remote hosts.
     if (/^http:\/\/localhost:8000\/?$/.test(m.pubpartner.endpoint||'')) m.pubpartner.endpoint=location.origin;
+    // Preserve connection secrets for this tab and scrub old persistent copies.
+    saveLLM(m);
     return m;
   } catch { return defaultLLM(); }
 }
-function saveLLM(cfg) { try { localStorage.setItem(LLM_KEY, JSON.stringify(cfg)); } catch {} }
+function saveLLM(cfg) {
+  try {
+    sessionStorage.setItem(LLM_KEY, JSON.stringify(cfg));
+    const safe = JSON.parse(JSON.stringify(cfg));
+    safe.claude.apiKey = ''; safe.openai.apiKey = ''; safe.pubpartner.token = '';
+    localStorage.setItem(LLM_KEY, JSON.stringify(safe));
+  } catch {}
+}
 let llmCfg = defaultLLM(); // Load saved settings only after Reach verifies their owner.
 let abortController = null;
 

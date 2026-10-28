@@ -1,17 +1,26 @@
 """Exercise the REAL Counter menu/controller scripts without network navigation.
 
-This is an environment-limited browser regression. Navigation to HTTP and file
-URLs is prohibited by the runner; graphics is deliberately stubbed. It checks
-real DOM menus, click handling, tray lifecycle and in-memory serialization,
-NOT GPU quality, authenticated HTTP, embedded iframe execution, or persistence
-across an actual browser restart. Those require separate target-device gates.
+This browser regression routes a synthetic HTTP origin locally and serves real
+auth, owner-config and host-layout API responses through TestClient. Graphics
+is stubbed for the first fixture; the second uses the actual Canvas 2D fallback.
+It checks DOM menus and tray lifecycle, not GPU quality, iframe app execution,
+network transport, or persistence across an actual browser restart.
 """
 from pathlib import Path
 import os
 import re
 import shutil
+import json
+from urllib.parse import urlparse
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from modules import userdb
+from modules.auth import create_access_token
+from modules.auth_routes import router as auth_router
+from modules.counter_layout import create_counter_layout_router
+from modules.writers_room import create_writers_room_router
 
 playwright = pytest.importorskip("playwright.sync_api")
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +32,46 @@ DOM = re.sub(r"<script(?:\s+[^>]*)?>.*?</script>", "", COUNTER_HTML, flags=re.S)
 
 
 @pytest.fixture
-def counter_page():
+def counter_host(tmp_path, monkeypatch):
+    monkeypatch.setattr(userdb, "_DB_PATH", tmp_path / "users.db")
+    userdb._sync_init_db()
+    assert userdb._sync_create_owner_via_setup("counter-owner", "counter-owner-password-1234")
+    app = FastAPI()
+    app.include_router(auth_router)
+    app.include_router(create_writers_room_router(tmp_path))
+    app.include_router(create_counter_layout_router(tmp_path))
+    token = create_access_token({"sub": "counter-owner", "role": "owner"})
+    with TestClient(app) as api:
+        yield api, token
+
+
+def load_counter_dom(page, counter_host):
+    api, token = counter_host
+    page.add_init_script("sessionStorage.setItem('pubcast_token'," + json.dumps(token) + ");")
+
+    def serve(route):
+        url = urlparse(route.request.url)
+        if url.path.startswith("/api/"):
+            response = api.request(route.request.method, url.path,
+                content=route.request.post_data,
+                headers={k: v for k, v in route.request.headers.items()
+                         if k.lower() in {"authorization", "content-type"}})
+            route.fulfill(status=response.status_code, body=response.content,
+                          content_type=response.headers.get("content-type", "application/json"))
+        elif url.path == "/":
+            route.fulfill(body=DOM, content_type="text/html")
+        elif url.path == "/health":
+            route.fulfill(json={"ok": True})
+        else:
+            route.fulfill(body="", content_type="text/html")
+
+    page.route("**/*", serve)
+    # localhost is a trustworthy origin, so the real crypto.randomUUID API works.
+    page.goto("http://localhost/")
+
+
+@pytest.fixture
+def counter_page(counter_host):
     with playwright.sync_playwright() as p:
         executable = (os.environ.get("FORESIGHT_TEST_CHROMIUM")
                       or shutil.which("chromium") or shutil.which("chromium-browser")
@@ -38,7 +86,7 @@ def counter_page():
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.set_content(DOM)
+        load_counter_dom(page, counter_host)
         page.evaluate("""() => {
           const storage = new Map();
           Object.defineProperty(window, 'localStorage', {configurable:true, value: {
@@ -102,12 +150,14 @@ def test_real_counter_integrates_2i_hosting_and_restorable_layout(counter_page):
     # The actual program provider creates the iframe and retains content identity.
     page.evaluate("__programs.open('twoi')")
     page.wait_for_function("__counter.trays.some(t=>t.stack[0].type==='twoi') && !__counter.trays[0].hidden", timeout=5000)
-    assert page.locator('iframe[src="/writers-room"]').count() == 1
+    frame = page.locator('iframe[src^="/writers-room?foresightSession="]')
+    assert frame.count() == 1
+    assert frame.get_attribute('src').split('foresightSession=')[1]
     page.evaluate("__counter.saveNow()")
     saved = page.evaluate("__counter.serialize()")
     assert len(saved["trays"]) == 1
     assert saved["trays"][0]["contents"][0]["type"] == "twoi"
-    assert page.evaluate("localStorage.getItem('foresight.counter.v3')")
+    assert page.evaluate("localStorage.getItem('foresight.counter.v3:counter-owner')")
     # Reconstruct a fresh counter, not a merge into an already populated one.
     restored = page.evaluate("""snap => {
       __counter.destroy();
@@ -124,7 +174,7 @@ def test_real_counter_integrates_2i_hosting_and_restorable_layout(counter_page):
 
 
 @pytest.fixture
-def compatibility_page():
+def compatibility_page(counter_host):
     """Actual application and its built-in Canvas 2D fallback, no GL test double."""
     with playwright.sync_playwright() as p:
         executable = (os.environ.get("FORESIGHT_TEST_CHROMIUM")
@@ -140,7 +190,7 @@ def compatibility_page():
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.set_content(DOM)
+        load_counter_dom(page, counter_host)
         page.evaluate("""() => {
           const storage=new Map();
           Object.defineProperty(window,'localStorage',{configurable:true,value:{
@@ -187,11 +237,21 @@ def test_real_canvas2d_can_render_five_mixed_tray_shapes(compatibility_page):
       for(const id of ['twoi','pubpartner_status','world_chat','recordings','doctor'])
         __programs.open(id);
     }""")
-    # Crowded admission is a queued physics operation, not a synchronous call.
-    # This is a generous CI bound; target-device animation performance is a
-    # separate measured acceptance gate, never silently relaxed in physics tests.
-    page.wait_for_function("__counter.trays.length===5",timeout=30000)
+    # Test the real admission/physics logic and a real Canvas 2D draw without
+    # making software-renderer frame rate an implicit admission deadline.
+    # The earlier lifecycle tests still exercise wall-clock animations.
+    page.evaluate("""() => {
+      const start=performance.now();
+      for(let frame=0;frame<2000;frame++){
+        __counter.debug.setClock(start+frame*16.7);
+        __counter.debug.step();
+        if(__counter.trays.length===5 && !__counter.debug.queue() &&
+           !__counter.debug.anim() && !__counter.trays.some(t=>t.admitting))break;
+      }
+      __counter.debug.draw();
+    }""")
     page.evaluate("__counter.settle(120)")
     assert page.evaluate("__counter.trays.length") == 5
     assert page.evaluate("__counter.trays.every(t=>t.stack.length===1)")
+    assert page.evaluate("__counter.debug.queue()===0 && !__counter.trays.some(t=>t.admitting)")
     assert page.evaluate("document.querySelectorAll('.fc-plaque').length") == 5

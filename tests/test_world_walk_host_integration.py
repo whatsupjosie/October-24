@@ -77,6 +77,27 @@ def owner(host):
     return data
 
 
+@pytest.fixture
+def fresh_studio_progress(host, owner):
+    """A fresh-start assertion needs fresh progress, even after earlier walks saved."""
+    response = httpx.put(host + "/api/studio/progress",
+        headers={"Authorization": "Bearer " + owner["access_token"]},
+        json={"progress": {}}, timeout=10)
+    assert response.status_code == 200, response.text
+
+
+@pytest.fixture
+def counter_entry_page(browser):
+    """A plain Counter page; no walker WebSocket spy, and always closed."""
+    pg = browser.new_page(viewport={"width": 1400, "height": 860})
+    pg.problems = []
+    pg.on("pageerror", lambda e: pg.problems.append(str(e)))
+    try:
+        yield pg
+    finally:
+        pg.close()
+
+
 @pytest.mark.parametrize("route", ["/walk", "/world-walk"])
 def test_the_host_serves_the_walkable_world(host, route):
     r = httpx.get(host + route, timeout=10)
@@ -299,13 +320,11 @@ def test_without_the_host_behind_it_the_walker_says_so_and_keeps_walking(page, t
         srv.terminate(); srv.wait(5)
 
 
-def test_bella_faux_pas_studio_opens_from_the_foresight_counter_in_the_dressing_room(host, browser, owner):
+def test_bella_faux_pas_studio_opens_from_the_foresight_counter_in_the_dressing_room(host, counter_entry_page, owner, fresh_studio_progress):
     """The Counter is the program's front door: its menu opens the walker in a tray, live, under the same session.
     Uses a plain page (no WebSocket recorder: the Counter does not start under it)."""
     import json
-    page = browser.new_page(viewport={"width": 1400, "height": 860})
-    page.problems = []
-    page.on("pageerror", lambda e: page.problems.append(str(e)))
+    page = counter_entry_page
     page.add_init_script("sessionStorage.setItem('pubcast_token', %s); sessionStorage.setItem('pubcast_user', JSON.stringify({username: 'walk-owner', user_id: 'walk-owner', role: 'owner'}));" % json.dumps(owner["access_token"]))
     # ?once: no continuous animation loop (software graphics here cannot keep up with it); fresh, nosave: a clean Counter
     page.goto(host + "/foresight-counter?once&fresh&nosave")
@@ -327,11 +346,10 @@ def test_bella_faux_pas_studio_opens_from_the_foresight_counter_in_the_dressing_
     assert frame.evaluate("window.PubCastWalk.S.room.id") == "dressing_room"        # the studio starts in the dressing room
     assert frame.evaluate("window.PubCastLive.state.room") == "dressing"
     assert page.problems == []
-    page.close()
 
 
 
-def test_the_studio_starts_in_the_dressing_room_with_no_start_given(host, signed_in):
+def test_the_studio_starts_in_the_dressing_room_with_no_start_given(host, signed_in, fresh_studio_progress):
     page = signed_in
     _open(page, host + "/walk")
     assert page.evaluate("window.PubCastWalk.S.room.id") == "dressing_room"

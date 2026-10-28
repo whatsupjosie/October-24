@@ -1,5 +1,25 @@
 # Build — Foresight integration status
 
+## 2026-10-28: autonomous stabilization pass
+
+Work branch: `codex/pubcast-stability-2026-10-28`; base `f0c2297`.
+Current ledger: `handoffs/PUBCAST_AGENT_PASS_2026-10-28.md`.
+
+- Final full suite: **2,025 passed, zero failed, two intentionally disabled
+  optional protocol module skips** (Linux, Python 3.12.14).
+- Node suite: **10 passed**. Strict async/resource/private-room/restart subset:
+  **74 passed**. Packaged route/asset preflight passed.
+- Camera displays have bounded sends, slow-peer removal and physical-socket
+  deduplication; room iteration survives membership changes.
+- Legacy 2i startup key assignment is fixed. Both 2i entry pages keep connection
+  secrets in tab storage and migrate/redact old permanent copies.
+- Counter browser fixtures now supply the required real owner/config routes;
+  Studio fresh-start tests isolate saved progress instead of contradicting it.
+- Nine originals are preserved verbatim with hashes. The canonical Alex vessel
+  is unchanged. Main and Copilot's branch remain untouched.
+- Hardware feeds, Windows, target GPU performance and real model replies still
+  require commissioning. Detailed history and limitations follow below.
+
 **2026-10-22, integration checkpoint.** This is the authoritative short status for
 Foresight inside this Build. It is **not** a declaration that all of PubCast is
 finished. Never treat a file, route, recovered donor, or test fixture as proof

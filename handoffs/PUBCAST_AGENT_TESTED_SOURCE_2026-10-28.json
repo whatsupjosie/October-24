@@ -1,0 +1,27 @@
+{
+  "base_commit": "f0c2297f50b33eda6cde9921ccc28a4908a27f46",
+  "branch": "codex/pubcast-stability-2026-10-28",
+  "sha256": {
+    "main.py": "a6a2f2b85c9fa1d826db9bb6861cac77fbd858a2480486ed4760edf45324b2a0",
+    "modules/cameras.py": "26e4958e902441216a2311de6ceef52d68651ca1861597a9098fb74915595fea",
+    "modules/camera_broadcast.py": "0826a43675a2b1f6120db25cbd14d885c554b518752d4add7a164adc2cbbc201",
+    "modules/cameras_advanced.py": "023d77807052219a4101548721e6ad9ecf321d9d62d2334e11a442e54153ac03",
+    "modules/switcher_routes.py": "a4186741283a84b8447709654850357cbd94d908a664441957afe43d3d0fa247",
+    "modules/hub.py": "d698755f60a571598cce8de66c3ff6b4bd534a06672a33391943b4bd741fb7d2",
+    "2i/index.html": "da83b6602b72505cd248e69d34009026fa8cbbca41c540a14793f37f7a117018",
+    "2i/writers-room-v22.html": "b2fbcbb340cd688580052ddbc4b25bc9dc8eefc49ef762df57da75b012417d3a",
+    "2i/2i-assets/reach.js": "ed04ff8f9446b444aa21bac0a7824243daee822b7174f7f9bec25a8b9eb2d97e",
+    "static/foresight_counter.js": "e9a4f25a1d77087ee497dd64c03674784d3a034d0284a9350510abaf99c02679",
+    "static/foresight_counter.html": "1eebd8755581083128ab35218e6f52d514701644e2399e96184171769a3c9a85",
+    "static/world_walk.html": "dc07efb88a9b2725f38441a837259e0478e92115bd32b02f85c81f27471a9235",
+    "static/world_walk_live.js": "ea9d67b6653045927c4073e070fb6c9f19ca63619e91eb076849e197e6f337b9",
+    "package.json": "c75e901ad164393b0554fdf6af9c5645567957d8524d6cd397eb703b7adea023",
+    "tests/test_camera_hub_delivery.py": "50891ceb68a20d5b271862129b78cdc412adba241d87aaa8aba5b58ddfb63aa2",
+    "tests/test_twoi_connection_storage_node.js": "36d88504fcbe723c33a23bc8873ff5e03d7c5b500ad40e00ca3ef7a773f336a0",
+    "tests/test_reach_editor.cjs": "9826466347ef6f1a79198a2439a0e99dcd1d458c13b588003790bd7e2d690a01",
+    "tests/test_foresight_airgapped_ui.py": "e195c64e84c22030d8945e67df205c6963fc2e80557c98e6908beacda3e877a0",
+    "tests/test_world_walk_host_integration.py": "8b698bf20ee1e7364aa8c73f9f426d403a61f829737c96a6e0fd5d86c7fe5f6c",
+    ".github/workflows/pubcast-stability.yml": "68fd12efaeba6b2085be199c2e90e408b00533aec968fa51883afd35f66437ca"
+  },
+  "canonical_alex_git_blob": "96fa66a728d07d5ff43b0d3d7fc17a466765cec1"
+}

@@ -1097,7 +1097,7 @@ html, body {
    ═══════════════════════════════════════════════════════════════════ */
 
 // ── LLM ENGINE ─────────────────────────────────────────────────────
-const LLM_KEY = 'pubcast2i_llm_v2';
+let LLM_KEY = 'pubcast2i_llm_v2';
 function defaultLLM() {
   return {
     provider:'pubpartner',
@@ -1114,6 +1114,8 @@ function loadLLM() {
     const p = JSON.parse(raw), d = defaultLLM();
     const m = Object.assign({}, d, p);
     for (const k of ['claude','openai','local','pubpartner']) m[k] = Object.assign({}, d[k], p[k] || {});
+    // Move legacy persistent secrets into this tab, retaining only safe defaults on disk.
+    saveLLM(m);
     return m;
   } catch { return defaultLLM(); }
 }

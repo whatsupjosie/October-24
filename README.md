@@ -1,4 +1,29 @@
-# Foresight offline file and code workspace — current handoff
+# PubCast — integrated program
+
+This source includes Foresight Counter, 2i Writer's Room, PubPartner and Bella
+Faux Pas Studio. Start it from this directory:
+
+```bash
+python run_reach.py
+```
+
+Install the runtime dependencies in `requirements.txt` during initial setup.
+Sign in or create the first local owner when prompted. Open 2i or PubPartner
+from the Counter's Open picker; the Bella Faux Pas fan blade opens the studio.
+Use the same data directory on subsequent starts to retain saved work.
+
+The current stabilization work is on `codex/pubcast-stability-2026-10-28`.
+See `STATUS.md` and `handoffs/PUBCAST_AGENT_PASS_2026-10-28.md` for the verified
+scope, changes, original-code preservation and remaining limits. Development
+browser/Node test tools are separate from the runtime. Local model weights and
+optional hardware backends are not included in the source ZIP.
+
+## Historical file-workspace handoff
+
+The earlier checkpoint below is preserved for provenance. Its old source-patch
+instructions and "no remote push" statement describe that earlier checkpoint.
+
+# Foresight offline file and code workspace — historical handoff
 
 This is the current implementation report. Earlier same-day audits remain historical. It is an update to the existing October source, baseline 82ebf26755d3706f8d4d7d75d823bb73f4d1b07e. It is not an installation into the user's computer or a full source distribution. No remote push was made.
 

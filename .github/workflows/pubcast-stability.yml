@@ -1,0 +1,65 @@
+name: PubCast stability regressions
+on:
+  push:
+    paths:
+      - 'modules/camera*.py'
+      - 'modules/hub.py'
+      - 'modules/switcher_routes.py'
+      - '2i/**'
+      - 'tests/test_camera*'
+      - 'tests/test_twoi_connection_storage_node.js'
+      - 'tests/test_reach_editor.cjs'
+      - 'tests/world_chat_integration/**'
+      - 'package*.json'
+      - 'requirements*.txt'
+      - 'main.py'
+      - '.github/workflows/pubcast-stability.yml'
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  stability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install declared test dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-dev.txt pytest-timeout
+          npm ci --ignore-scripts
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Editor, storage and stage JavaScript regressions
+        run: npm run test:node
+      - name: Camera, private-room and restart regressions
+        env:
+          PYTHONASYNCIODEBUG: '1'
+        run: |
+          python -W error::ResourceWarning -W error::RuntimeWarning -m pytest -q --timeout=90 \
+            -W error::pytest.PytestUnraisableExceptionWarning \
+            -W error::pytest.PytestUnhandledThreadExceptionWarning \
+            tests/test_camera_hub_delivery.py tests/test_camera_shutdown_regressions.py \
+            tests/test_camera_state_and_delivery.py tests/test_camera_manager.py \
+            tests/test_camera_broadcast.py tests/test_camera_capture_cleanup.py \
+            tests/test_round4_runtime_truth.py \
+            tests/world_chat_integration/test_dm_cross_worker_authority.py \
+            tests/world_chat_integration/test_dm_privacy.py \
+            tests/world_chat_integration/test_dm_durable_consent.py \
+            tests/test_writers_room_real_http.py tests/test_saves_survive_restart.py \
+            --junitxml=pubcast-stability-junit.xml
+      - name: Preserve results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pubcast-stability-results
+          path: pubcast-stability-junit.xml
+          if-no-files-found: ignore
