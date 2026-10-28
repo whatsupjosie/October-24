@@ -131,6 +131,25 @@ class CameraSource:
         # Voxel engine TCP connection
         self._voxel_reader = None
         self._voxel_writer = None
+
+    @staticmethod
+    def _close_owned_streams(proc: Optional[subprocess.Popen]) -> None:
+        """Close any pipes we created, even if the child already exited."""
+        if proc is None:
+            return
+        for stream_name in ("stdout", "stderr", "stdin"):
+            stream = getattr(proc, stream_name, None)
+            if stream is None:
+                continue
+            try:
+                if hasattr(stream, "flush"):
+                    stream.flush()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
         
     async def connect(self) -> bool:
         """Establish connection to camera source"""
@@ -450,7 +469,7 @@ class CameraSource:
         if transport == CameraTransport.FILE_PLAYBACK:
             return ["-re", "-i", source]
         return None
-
+    
     async def start_capture(self) -> bool:
         """Start a real ffmpeg raw-frame capture pipeline for supported transports."""
         if self.is_capturing:
@@ -475,7 +494,7 @@ class CameraSource:
             self.metadata.error_message = str(exc)
             logger.error("Failed to start capture for camera %s: %s", self.id, exc)
             return False
-
+    
     def _capture_frames(self, input_args: List[str]) -> None:
         """Read RGB frames from ffmpeg; never synthesize frames as capture success."""
         frame_size = int(self.metadata.width) * int(self.metadata.height) * 3
@@ -522,23 +541,18 @@ class CameraSource:
         finally:
             proc = self.capture_process
             self.capture_process = None
-            if proc is not None:
-                try:
-                    if proc.poll() is None:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait(timeout=2)
-                finally:
-                    # The capture worker owns these streams. Reap first, then
-                    # release both pipes even if ffmpeg already exited itself.
-                    for stream in (proc.stdout, proc.stderr, proc.stdin):
-                        if stream is not None:
-                            stream.close()
+            try:
+                if proc is not None and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=2)
+            finally:
+                self._close_owned_streams(proc)
             self.is_capturing = False
-
+    
     async def stop_capture(self):
         """Stop capturing frames and terminate the owned ffmpeg process."""
         self.is_capturing = False
@@ -969,16 +983,16 @@ class AdvancedCameraManager:
         """
         # If Switchblade has issued a priority vector, read it
         vector = getattr(self, '_switchblade_vector', None)
-
+ 
         if vector is not None:
             # Identity moment: lock program camera — do not auto-switch
             if getattr(vector, 'identity_moment', False):
                 return  # Hard lock — no switch during identity moments
-
+ 
             # If E4 is assisting, don't switch cameras — disrupts render budget
             if getattr(vector, 'e4_assist', False):
                 return
-
+ 
         # Normal auto-switch logic: switch if program camera has errors
         if self.program_source and self.program_source in self.sources:
             program_cam = self.sources[self.program_source]
@@ -1124,14 +1138,14 @@ if __name__ == "__main__":
         
         # Get system stats
         stats = camera_manager.get_all_stats()
-        print(f"\\nSystem status: {stats['system']}")
+        print(f"\nSystem status: {stats['system']}")
         
         # Exercise source switching in the standalone module demo
         await asyncio.sleep(2)
         
         if camera_manager.sources:
             camera_id = list(camera_manager.sources.keys())[0]
-            print(f"\\nCutting to camera: {camera_id}")
+            print(f"\nCutting to camera: {camera_id}")
             await camera_manager.cut_to_camera(camera_id)
         
         await asyncio.sleep(3)
