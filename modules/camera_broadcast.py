@@ -1,152 +1,124 @@
+# PubCast AI — camera_broadcast.py
+# Copyright © 2024–2026 Josie Curtsey Cobbley (Joshua Cobbley)
+# Rearview Foresight LLC — All Rights Reserved
+# Feic Mo Chroí — See My Heart
+"""One place that tells every page when the program or preview camera changes.
+
+This bridge is the single canonical outbound message path for camera events.
+It listens for CameraManager state changes and re-emits a standard camera_switch
+payload to the hub so the UI and other app components stay in sync.
+"""
+from __future__ import annotations
+
 import asyncio
+import logging
 import time
+from collections import OrderedDict
+from typing import Any, Optional, Set
 
-import pytest
+from .cameras import CameraManager, CameraSwitchEvent
 
-from modules.camera_broadcast import CameraBroadcastBridge
-from modules.cameras import CameraManager, CameraSource, CameraSwitchEvent, CameraTransport
-
-
-def make_camera(source_id: str, name: str) -> CameraSource:
-    return CameraSource(
-        source_id=source_id,
-        name=name,
-        description="test camera",
-        location="studio",
-        transport=CameraTransport.VIRTUAL,
-        endpoint=f"virtual://{source_id}",
-    )
+logger = logging.getLogger("pubcast.camera_broadcast")
 
 
-def test_register_and_lookup():
-    manager = CameraManager()
-    source = make_camera("cam_a", "Cam A")
-    manager.register(source)
+class CameraBroadcastBridge:
+    def __init__(self, cameras: CameraManager, hub: Any):
+        self.cameras = cameras
+        self.hub = hub
+        self._token: Optional[int] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._tasks: Set[asyncio.Task] = set()
+        self._seen_event_ids: "OrderedDict[str, None]" = OrderedDict()
+        self.max_event_cache = 1000
+        self.sent = 0
 
-    assert manager.get("cam_a") == source
-    assert manager.list_sources() == [source]
+    @property
+    def running(self) -> bool:
+        return self._token is not None
 
+    def start(self) -> None:
+        """Subscribe from inside the running event loop (the app lifespan)."""
+        if self._token is not None:
+            return
+        self._loop = asyncio.get_running_loop()
+        self._token = self.cameras.subscribe(self._on_event)
+        if self.hub is not None:
+            setattr(self.hub, "camera_events_bridged", True)
 
-def test_invalid_source_rejected():
-    manager = CameraManager()
-    manager.register(make_camera("cam_a", "Cam A"))
+    async def stop(self, timeout: float = 5.0) -> None:
+        if self._token is not None:
+            self.cameras.unsubscribe(self._token)
+            self._token = None
+        if self.hub is not None and getattr(self.hub, "camera_events_bridged", False):
+            setattr(self.hub, "camera_events_bridged", False)
 
-    assert manager.set_program_source("missing") is False
-    assert manager.set_preview_source("missing") is False
+        pending = [task for task in self._tasks if not task.done()]
+        if pending:
+            for task in pending:
+                task.cancel()
+            done, pending = await asyncio.wait(pending, timeout=timeout, return_when=asyncio.ALL_COMPLETED)
+            for task in pending:
+                task.cancel()
+            self._tasks = {task for task in done if task not in pending}
+        self._tasks.clear()
+        self._seen_event_ids.clear()
 
+    def _dedupe_event(self, event: CameraSwitchEvent) -> bool:
+        event_id = getattr(event, "event_id", None)
+        if not event_id:
+            return True
+        if event_id in self._seen_event_ids:
+            self._seen_event_ids.move_to_end(event_id)
+            return False
+        self._seen_event_ids[event_id] = None
+        if len(self._seen_event_ids) > self.max_event_cache:
+            self._seen_event_ids.popitem(last=False)
+        return True
 
-def test_take_swaps_program_preview():
-    manager = CameraManager()
-    cam_a = make_camera("cam_a", "Cam A")
-    cam_b = make_camera("cam_b", "Cam B")
-    manager.register(cam_a)
-    manager.register(cam_b)
+    def message(self, event: CameraSwitchEvent) -> dict:
+        snapshot = self.cameras.snapshot()
+        return {
+            "type": "camera_switch",
+            "payload": {
+                "target": event.destination,
+                "source_id": event.source_id,
+                "previous_source_id": event.previous_source_id,
+                "program": snapshot.program,
+                "preview": snapshot.preview,
+                "timestamp": event.timestamp or time.time(),
+                "event_id": getattr(event, "event_id", None),
+            },
+        }
 
-    manager.set_program_source("cam_a")
-    manager.set_preview_source("cam_b")
-    manager.take()
+    def _on_event(self, event: Any) -> None:
+        if not isinstance(event, CameraSwitchEvent) or self.hub is None or self._loop is None:
+            return
+        if not self._dedupe_event(event):
+            return
+        message = self.message(event)
 
-    assert manager.get_program_source_id() == "cam_b"
-    assert manager.get_preview_source_id() == "cam_a"
+        def schedule() -> None:
+            task = self._loop.create_task(self._send(message))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self._loop:
+            schedule()
+        elif not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(schedule)
 
-def test_remove_clears_stale_source_refs():
-    manager = CameraManager()
-    manager.register(make_camera("cam_a", "Cam A"))
-    manager.register(make_camera("cam_b", "Cam B"))
-
-    manager.set_program_source("cam_a")
-    manager.set_preview_source("cam_b")
-
-    assert manager.remove("cam_a") is True
-    assert manager.get_program_source_id() is None
-    assert manager.get_preview_source_id() == "cam_b"
-
-    assert manager.remove("cam_b") is True
-    assert manager.get_preview_source_id() is None
-
-
-def test_switch_event_has_event_id():
-    manager = CameraManager()
-    manager.register(make_camera("cam_a", "Cam A"))
-    manager.register(make_camera("cam_b", "Cam B"))
-
-    manager.set_program_source("cam_a")
-    source_id = manager.get_program_source_id()
-    assert source_id == "cam_a"
-
-    event = CameraSwitchEvent("program", "cam_b", "cam_a", time.time())
-    assert event.event_id.startswith("cam-switch-")
-
-
-@pytest.mark.asyncio
-async def test_broadcast_bridge_deduplicates_event_ids():
-    manager = CameraManager()
-    manager.register(make_camera("cam_a", "Cam A"))
-    manager.register(make_camera("cam_b", "Cam B"))
-
-    class FakeHub:
-        def __init__(self):
-            self.messages = []
-
-        async def broadcast_system_event(self, message):
-            self.messages.append(message)
-
-    hub = FakeHub()
-    bridge = CameraBroadcastBridge(manager, hub)
-    bridge._loop = asyncio.get_running_loop()
-
-    event = CameraSwitchEvent("program", "cam_b", "cam_a", time.time(), "evt-1")
-    bridge._on_event(event)
-    bridge._on_event(event)
-
-    await asyncio.sleep(0)
-
-    assert len(hub.messages) == 1
-    assert hub.messages[0]["payload"]["event_id"] == "evt-1"
-
-
-def test_snapshot_state_is_stable():
-    manager = CameraManager()
-    manager.register(make_camera("cam_a", "Cam A"))
-    manager.register(make_camera("cam_b", "Cam B"))
-
-    manager.set_program_source("cam_a")
-    manager.set_preview_source("cam_b")
-
-    snapshot = manager.snapshot()
-    assert snapshot.program == "cam_a"
-    assert snapshot.preview == "cam_b"
-
-    manager.take()
-    snapshot = manager.snapshot()
-    assert snapshot.program == "cam_b"
-    assert snapshot.preview == "cam_a"
+    async def _send(self, message: dict) -> None:
+        try:
+            if self.hub is None or not hasattr(self.hub, "broadcast_system_event"):
+                return
+            await self.hub.broadcast_system_event(message)
+            self.sent += 1
+        except Exception:
+            logger.exception("camera_switch broadcast failed for %s", message["payload"].get("source_id"))
 
 
-def test_update_pose_validates_ranges():
-    manager = CameraManager()
-    manager.register(make_camera("cam_a", "Cam A"))
-
-    manager.update_pose("cam_a", position=[1.0, 2.0, 3.0], rotation=[0.0, 5.0, 10.0], fov=60.0)
-
-    cam = manager.get("cam_a")
-    assert cam.position == [1.0, 2.0, 3.0]
-    assert cam.rotation == [0.0, 5.0, 10.0]
-    assert cam.fov == 60.0
-
-    with pytest.raises(ValueError):
-        manager.update_pose("cam_a", position=[1.0, 2.0])
-
-    with pytest.raises(ValueError):
-        manager.update_pose("cam_a", fov=0.0)
-
-
-__all__ = [
-    "CameraManager",
-    "CameraSource",
-    "CameraSwitchEvent",
-    "CameraTransport",
-    "CameraBroadcastBridge",
-]
-
+__all__ = ["CameraBroadcastBridge"]
