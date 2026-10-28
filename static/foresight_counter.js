@@ -303,7 +303,11 @@
 
     // ---------- the scene: bounds, fan, lantern, dock
     const PIVOT = [62, 112];
-    function bladeCount(){ return 1 + trays.length; }   // the New blade, then one per tray
+    // Fixed blades: programs with a permanent place on the fan, right after New (opt.blades = [{label, run}]). A click
+    // runs it; the program decides whether that opens a tray or brings its open one forward.
+    const FIXED = (Array.isArray(opt.blades) ? opt.blades : []).filter(b => b && b.label && typeof b.run === 'function');
+    const NF = FIXED.length;
+    function bladeCount(){ return 1 + NF + trays.length; }   // the New blade, the fixed blades, then one per tray
     function bladeAngles(n){
       const span = 92, stepDeg = n > 1 ? Math.min(14.5, span/(n - 1)) : 0;
       return Array.from({length: n}, (_, i) => (2 + i*stepDeg)*Math.PI/180);
@@ -321,7 +325,7 @@
     const barPoly = W => S.geom.orient([[22,10],[W-22,10],[W-8,32],[W-22,54],[22,54],[8,32]]);
     function dockSlot(i){ return [innerWidth - 112, TOP + 34 + i*36]; }
     function dockTagPoly(i){ const [x, y] = dockSlot(i); return hull(circlePts([x - 78, y], 14, 16).concat(circlePts([x + 78, y], 14, 16))); }
-    function bladeIndexOf(t){ return 1 + trays.indexOf(t); }
+    function bladeIndexOf(t){ return 1 + NF + trays.indexOf(t); }
     function bladePop(){
       if(!anim || anim.blade === undefined) return {i: -1, pop: 0};
       const k = Math.min(1, (clock() - anim.t0)/anim.dur);
@@ -973,7 +977,8 @@
       hideMenu();
       const b = hitBlade(e.clientX, e.clientY);
       if(b === 0){ openPicker(null); return; }
-      if(b > 0){ const t = trays[b - 1]; if(!t) return;
+      if(b > 0 && b <= NF){ FIXED[b - 1].run(); return; }
+      if(b > NF){ const t = trays[b - 1 - NF]; if(!t) return;
         if(t.closed) reopen(t); else if(t.parked) unpark(t); else { select(t); t.flash = clock(); dirty = true; }
         return; }
       const t = hitTray(e.clientX, e.clientY);
@@ -983,7 +988,8 @@
     const onCanvasMenu = e => {
       e.preventDefault();
       const b = hitBlade(e.clientX, e.clientY);
-      if(b > 0 && trays[b - 1]){ openTrayMenu(trays[b - 1], e.clientX, e.clientY); return; }
+      if(b > NF && trays[b - 1 - NF]){ openTrayMenu(trays[b - 1 - NF], e.clientX, e.clientY); return; }
+      if(b > 0 && b <= NF){ FIXED[b - 1].run(); return; }
       if(b === 0){ openPicker(null); return; }
       const t = hitTray(e.clientX, e.clientY); if(t) openTrayMenu(t, e.clientX, e.clientY);
     };
@@ -1078,16 +1084,16 @@
       if(G.lamp){ const L = c.lantern, n = L.length; G.lightPos = [L.reduce((a, p) => a + p[0], 0)/n, L.reduce((a, p) => a + p[1], 0)/n]; }
       const benchMetal = theme === 'pearl' || theme === 'nero' ? M.CHAMPAGNE : M.SILVER;
       if(opt.bar !== false) items.push({q: barPoly(c.W), ornate: true, r: 12, rim: 9, rimMat: benchMetal, floorMat: benchMetal, height: 7, thick: 7, seed: 2});
-      // the fan: the New blade first (champagne), then one blade per tray in that tray's own frame metal
+      // the fan: the New blade first (champagne), the fixed blades (champagne), then one blade per tray in that tray's own frame metal
       const now = clock();
       c.blades.forEach((b, i) => {
-        const t = i > 0 ? trays[i - 1] : null, look = t ? lookFor(t) : null;
+        const t = i > NF ? trays[i - 1 - NF] : null, look = t ? lookFor(t) : null, fixed = i > 0 && i <= NF ? FIXED[i - 1] : null;
         const dim = t && (t.closed || t.parked), on = t && t === selected, flash = t && t.flash && now - t.flash < 900 ? 1 - (now - t.flash)/900 : 0;
         items.push({q: b.q, r: 5, rim: 6, rimMat: t ? (look[0] < 10 ? look[0] : M.CHAMPAGNE) : M.CHAMPAGNE, floorMat: dim ? M.TORTOISE : M.PEARL, height: 6, thick: 5, seed: 30 + i,
           glow: on || flash ? (GLOW[look[1]] || GLOW.warm) : [1, 0.9, 0.75, 0.2], backlight: flash});
         let lab = bladeLabels[i];
         if(!lab){ lab = document.createElement('div'); lab.className = 'fc-blade'; root.appendChild(lab); bladeLabels[i] = lab; }
-        lab.textContent = t ? activeContent(t).title : '+  New';
+        lab.textContent = t ? activeContent(t).title : fixed ? fixed.label : '+  New';
         lab.classList.toggle('fc-dim', !!dim);
         lab.style.display = '';
         lab.style.left = (PIVOT[0] + Math.cos(b.angle)*(64 + b.pop)) + 'px'; lab.style.top = (PIVOT[1] + Math.sin(b.angle)*(64 + b.pop) - 7) + 'px';
@@ -1184,7 +1190,8 @@
           w: Math.round(t.reqW), h: Math.round(t.reqH), scale: +(t.scale || 1).toFixed(3), min: stackMin(t), natural: t.natural, cx: Math.round(t.cx), cy: Math.round(t.cy),
           locked: t.locked, family: t.family, requested: t.requestedFamily || t.family, corners: t.q.length, hidden: !!t.hidden, closed: !!t.closed, parked: !!t.parked, dent: t.chain ? +t.chain.dent.toFixed(1) : 0}; },
         dents(){ return Object.fromEntries(trays.filter(t => t.chain && !t.hidden).map(t => [t.id, +t.chain.dent.toFixed(1)])); },
-        pressure: () => Ch.pressure(trays), blades: () => ctx().blades.map((b, i) => ({i, tip: b.tip.map(Math.round), title: i ? activeContent(trays[i - 1]).title : 'New'})),
+        pressure: () => Ch.pressure(trays), blades: () => ctx().blades.map((b, i) => ({i, tip: b.tip.map(Math.round),
+          title: i === 0 ? 'New' : i <= NF ? FIXED[i - 1].label : activeContent(trays[i - 1 - NF]).title, fixed: i > 0 && i <= NF})),
         menuItems: () => [...menu.querySelectorAll('button')].map(b => b.textContent), clickMenu(label){ const b = [...menu.querySelectorAll('button')].find(x => x.textContent === label); if(b) b.click(); return !!b; },
         veilItems: () => [...veil.querySelectorAll('button')].map(b => b.textContent.split('\n')[0]), clickVeil(label){ const b = [...veil.querySelectorAll('button')].find(x => x.querySelector('b') ? x.querySelector('b').textContent === label : x.textContent === label); if(b) b.click(); return !!b; },
         hit: (x, y) => { const t = hitTray(x, y); return t ? t.id : null; }, bladeAt: (x, y) => hitBlade(x, y)

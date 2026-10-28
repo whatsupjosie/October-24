@@ -16,6 +16,8 @@
   .bar-ui{position:fixed;left:84px;right:30px;top:13px;z-index:6;display:flex;gap:2px;align-items:center;font-family:var(--fs-font-display,serif)}
   .bar-ui .brand{font-weight:700;letter-spacing:.26em;font-size:17px;margin-right:22px;color:#3a2a14;text-shadow:0 1px 0 rgba(255,246,222,.75),0 -1px 0 rgba(60,40,15,.25);user-select:none}
   .menu{position:relative}
+  .compat-badge{position:fixed;left:14px;bottom:12px;z-index:40;max-width:min(560px,calc(100vw - 28px));padding:7px 12px;border-radius:10px;
+    background:rgba(20,14,10,.86);color:#e8d6b4;border:1px solid rgba(214,169,87,.45);font:12px/1.4 var(--fs-font-ui,system-ui,sans-serif)}
   .menu-btn{background:none;border:0;padding:6px 11px;border-radius:8px;font:700 12px var(--fs-font-display,serif);letter-spacing:.14em;text-transform:uppercase;color:var(--ink);cursor:pointer}
   .menu-btn:hover,.menu.open .menu-btn,.menu-btn:focus-visible{background:rgba(60,40,20,.13);outline:none}
   .menu-list{position:absolute;left:0;top:calc(100% + 8px);min-width:250px;display:none;padding:6px;border-radius:12px;z-index:30;
@@ -93,6 +95,7 @@
 <script src="/static/foresight.config.js"></script>
 <script src="/static/foresight_shapes.js"></script>
 <script src="/static/foresight_gl.js"></script>
+<script src="/static/foresight_canvas2d.js"></script>
 <script src="/static/foresight_chain.js"></script>
 <script src="/static/foresight_counter.js"></script>
 <script src="/static/foresight_files.js"></script>
@@ -107,7 +110,20 @@ const M = ForesightGL.MAT, params = new URLSearchParams(location.search);
 const canvas = document.getElementById('gl'), hintEl = document.getElementById('hint');
 function createRenderer(canvas,notice){
   try{return new ForesightGL(canvas);}
-  catch(error){
+  catch(glError){
+    // No WebGL2 (old graphics, a locked-down machine): the same Counter on the simpler Canvas 2D renderer.
+    try{
+      const fallback=new ForesightCanvas2D(canvas);
+      // a standing badge (not the hint, which the Counter rewrites every second) saying which mode this is and why
+      const badge=document.createElement('div');
+      badge.setAttribute('role','status');badge.setAttribute('aria-label','Graphics compatibility mode');
+      badge.className='compat-badge';
+      badge.textContent='Simpler graphics: this computer could not start the full renderer. Everything works; it only looks plainer.';
+      badge.title=String(glError&&glError.message||glError);
+      document.body.appendChild(badge);
+      return fallback;
+    }catch(error){ glError=error; }
+    const error=glError;
     notice.textContent='Foresight could not start its graphics renderer. Your files have not been changed. ';
     const editor=document.createElement('a');editor.href='/writers-room';editor.textContent='Open 2i Writer’s Room';
     notice.appendChild(editor);notice.style.display='block';
@@ -177,6 +193,8 @@ function ask({title, sub = '', placeholder = '', value = '', validate = null, in
 // ---------------------------------------------------------------- the counter and its programs
 const programs = ForesightPrograms.create({toast: t => counter && counter.toast(t), ask});
 counter = ForesightCounter.create({canvas, gl: G, provider: programs.provider, theme: look.theme, top: 70,
+  // Bella Faux Pas, the game section of PubCast, has its own blade on the fan (Josie, 2026-10-27)
+  blades: [{label: 'Bella Faux Pas', run: () => programs.open('bella_faux_pas')}],
   storageKey: null, looks: frameLook,
   onEvent: () => { updateHint(); },
   confirmDiscard: async titles => {

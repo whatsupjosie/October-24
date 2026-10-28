@@ -5,6 +5,18 @@ Foresight inside this Build. It is **not** a declaration that all of PubCast is
 finished. Never treat a file, route, recovered donor, or test fixture as proof
 of live functionality.
 
+## 2026-10-27: Bella Faux Pas Studio (walkable world) integrated
+
+Details and ledger: `handoffs/WORLD_WALK_INTEGRATION_2026-10-27.md`. Guide: `docs/WORLD_WALK.md`.
+
+- **The studio:** Bella Faux Pas Studio, the game section, opens from its own fan blade or File › Open…, in the dressing room. It runs at `/walk` and is live on the same PubWorld socket and hotspot backend as `/world`.
+- **Canvas 2D fallback:** it was not actually wired into `foresight_counter.html`. It is now: on a WebGL2 failure the page falls back to `ForesightCanvas2D` and shows a "Graphics compatibility mode" status badge.
+- **Full suite** (Python 3.12, 120 s limit per test):
+  - clean `022d9ec`: 1,798 passed, 15 failed, 2 errors
+  - with this change: 1,938 passed, 17 failed, 0 errors
+  - The failing set is the same Foresight browser tests. 13 are in `test_foresight_file_workspace.py` and 4 in `test_foresight_airgapped_ui.py`; the two Canvas 2D tests among them used to error at setup and now reach tray admission, where they time out like the other two.
+- **Launch acceptance:** `tests/test_bella_faux_pas_launch_acceptance.py` passes. It covers `run_reach.py`, login, the empty Counter, 2i, PubPartner and the studio.
+
 ## Already implemented — do not rebuild from scratch
 
 - Foresight Counter entry point, locally hosted under `/foresight-counter`.

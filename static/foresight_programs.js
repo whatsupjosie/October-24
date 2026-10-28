@@ -51,6 +51,7 @@
      w: 980, h: 620, minW: 600, minH: 400, shape: 'wide', singleton: true},
     {id: 'pubpartner_chat', title: 'Character Chat', group: 'Programs', kind: 'page', url: '/pub-partner-chat',
      w: 520, h: 560, minW: 360, minH: 380, shape: 'chat', singleton: true},
+    {id: 'bella_faux_pas', title: 'Bella Faux Pas Studio', short: 'Studio', group: 'Programs', kind: 'page', url: '/walk', w: 980, h: 620, minW: 600, minH: 400, shape: 'room', singleton: true},
     {id: 'care_eq', title: 'CARE / EQ & Little Mode', short: 'CARE', group: 'Programs', kind: 'page', url: '/static/foresight_care.html',
      w: 640, h: 520, minW: 440, minH: 360, shape: 'tool', singleton: true},
     // studio rooms: direct work navigation, always available beside any walkable map

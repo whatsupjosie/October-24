@@ -9,7 +9,10 @@ and background specifications for every room in the Belle Époque Studios
 
 GREEN ROOM is the hub. All doors are visible from here. It connects
 directly to: Dressing Room, Writers Room, Studio, Control Room, Bar,
-and the Hallway that leads to the Lobby and Palace Theater.
+and, up a flight of stairs, the Palace Theater hallway. The hallway leads
+down to the Lobby and into the Palace Theater; the Lobby opens onto the
+Parking Lot and, upstairs, the manager's office and the projection booth.
+The full picture-by-picture map is pubcast_world.py.
 
 AVATARS are glowing ethereal SVG energy figures — translucent, graceful,
 luminous. NOT sprites. NOT pixel art. NOT cel-shaded. Each character has
@@ -94,7 +97,7 @@ ROOMS: Dict[str, RoomDef] = {
             "dartboard ceremony, script rewrites, and AI-assisted ideation. "
             "The corkboard remembers every past brainstorm."
         ),
-        connects_to=["green_room"],
+        connects_to=["green_room", "hallway"],
         background_style="functional creative chaos, whiteboard and post-its",
         ambient_sound="marker on whiteboard, coffee mug clinks",
         lighting_mood="overhead fluorescent mixed with desk lamps",
@@ -111,7 +114,7 @@ ROOMS: Dict[str, RoomDef] = {
             "rig hanging above the stage. Purfluous runs it like a theater. "
             "Pete runs it like a factory. The truth is somewhere between."
         ),
-        connects_to=["green_room", "control_room", "foley_room"],
+        connects_to=["green_room", "studio_floor", "foley_room"],
         background_style=(
             "Neo-Deco Analog Luxe — 360° SVG panoramic with arched panels, "
             "brass trim, wall sconces, teal control-room glass, hanging "
@@ -136,7 +139,7 @@ ROOMS: Dict[str, RoomDef] = {
             "meters still glowing. Pete's domain. The hidden computer in "
             "the vacuum tube TV husk lives here."
         ),
-        connects_to=["green_room", "studio"],
+        connects_to=["green_room"],
         background_style=(
             "hybrid analog-digital: brass piping around modern monitors, "
             "analog meters beside digital waveforms, blue LED cutting "
@@ -175,7 +178,7 @@ ROOMS: Dict[str, RoomDef] = {
             "and fall. Pints the cat lives here. Stage Door Joe sleeps "
             "outside."
         ),
-        connects_to=["green_room", "bar_stage", "bar_bathroom"],
+        connects_to=["green_room", "parking_lot", "bar_stage", "bar_bathroom"],
         background_style=(
             "Old English pub, unchanged. Rich wood, brass fixtures, "
             "amber tungsten, stained-glass reflections, worn bar top"
@@ -225,15 +228,15 @@ ROOMS: Dict[str, RoomDef] = {
     # ── THE HALLWAY & THEATER ────────────────────────────────────────────
     "hallway": RoomDef(
         room_id="hallway",
-        display_name="Hallway",
+        display_name="Palace Theater Hallway",
         description=(
-            "The corridor connecting the studio to the outside world. "
-            "Old movie posters in dusty frames. The sound of the pub "
-            "fades behind you like a dying heartbeat. Leads to the "
-            "lobby and the palace theater."
+            "The hall right outside the movie theater: a gold statue, a "
+            "compass in the floor, a THEATER LOBBY sign, and stairs at the "
+            "back that climb to the Green Room. The sound of the pub fades "
+            "behind you like a dying heartbeat."
         ),
-        connects_to=["green_room", "lobby"],
-        background_style="wood paneling, dusty poster frames, dim sconces",
+        connects_to=["green_room", "writers_room", "lobby", "palace_theater"],
+        background_style="gold statue, compass floor, dim sconces, stairs up",
         ambient_sound="footsteps echo, distant electrical hum",
         lighting_mood="dim amber, shadows between frames",
         narrative_note="The border between the real and the performative.",
@@ -243,13 +246,13 @@ ROOMS: Dict[str, RoomDef] = {
         room_id="lobby",
         display_name="Lobby",
         description=(
-            "Abandoned theater lobby. Fading gold leaf, cracked marble "
+            "Abandoned theater lobby, all rounded edges and one wild chandelier. Fading gold leaf, cracked marble "
             "floor, a ticket booth with no one inside. The marquee "
             "outside has half its letters burned out. Heals as creators "
             "arrive — the more work you do, the more this space comes "
             "back to life."
         ),
-        connects_to=["hallway", "palace_theater"],
+        connects_to=["hallway", "parking_lot", "lobby_upstairs"],
         background_style="abandoned grandeur, gold leaf, cracked marble",
         ambient_sound="wind through broken glass, distant traffic",
         lighting_mood="cold daylight through dirty windows",
@@ -266,7 +269,7 @@ ROOMS: Dict[str, RoomDef] = {
             "premiere happens. Gold light seeps under the locked door "
             "until you earn your way in."
         ),
-        connects_to=["lobby"],
+        connects_to=["hallway"],
         background_style=(
             "decayed grandeur — gold leaf, velvet, dust in projector beams, "
             "art-deco sconces, massive stained screen"
@@ -277,6 +280,124 @@ ROOMS: Dict[str, RoomDef] = {
             "Locked. Gold light under the door. You earn your way in by "
             "completing the story. This is where the double feature plays."
         ),
+    ),
+
+    # ── OUTSIDE & UPSTAIRS (added 2026-10-18 from Josie's geography) ─────
+    "monument": RoomDef(
+        room_id="monument",
+        display_name="Monument Entrance",
+        description=(
+            "The Rear View Foresight monument between brass art-deco "
+            "columns, a fountain plaza and reflecting pool, and the "
+            "Dowywood sign on the far hill. Seen by day and by night."
+        ),
+        connects_to=["parking_lot"],
+        background_style="art-deco monument, brass, fountain plaza, hill sign",
+        ambient_sound="fountain, distant traffic, night insects",
+        lighting_mood="golden daylight or deep blue night with lit sign",
+        narrative_note="Where you arrive.",
+    ),
+
+    "parking_lot": RoomDef(
+        room_id="parking_lot",
+        display_name="Parking Lot",
+        description=(
+            "Aerial view of the lot: palms, planters, and the Palace "
+            "Theater's front door."
+        ),
+        connects_to=["monument", "lobby", "bar"],
+        background_style="aerial, palm trees, landscaping",
+        ambient_sound="wind, far-off traffic",
+        lighting_mood="open sky",
+        narrative_note="The last stretch of the real world.",
+    ),
+
+    "lobby_upstairs": RoomDef(
+        room_id="lobby_upstairs",
+        display_name="Upstairs Lobby",
+        description=(
+            "The second floor of the rounded lobby: a curved railing, a "
+            "sofa and a round table, a fountain bar glowing under the "
+            "chandelier, the MANAGER door, and a smaller door beside it."
+        ),
+        connects_to=["lobby", "manager_office", "projection_booth"],
+        background_style="rounded balcony, cracked marble, glowing fountain",
+        ambient_sound="fountain hum, faint echo",
+        lighting_mood="recessed spots and blue glow from the fountain",
+        narrative_note="Where the Palace's offices begin.",
+    ),
+
+    "manager_office": RoomDef(
+        room_id="manager_office",
+        display_name="Sir Purfluous's Office",
+        description=(
+            "The theater manager's office, its window looking down on the "
+            "Palace auditorium and stage."
+        ),
+        connects_to=["lobby_upstairs"],
+        background_style="private office, certificates, window onto stage",
+        ambient_sound="clock tick, muffled auditorium",
+        lighting_mood="warm lamp light",
+        narrative_note="Guardian of tradition.",
+    ),
+
+    "studio_floor": RoomDef(
+        room_id="studio_floor",
+        display_name="Studio, closer",
+        description=(
+            "A closer crop of the open studio: curved sets, monitors, "
+            "chandeliers and the blue vortex backdrop. Reached from the far "
+            "shot by walking up to a trigger spot. All the way to the left "
+            "is the director's chair."
+        ),
+        connects_to=["studio", "studio_director"],
+        background_style="art-deco studio floor, monitors, chandeliers",
+        ambient_sound="stage hum, cables, far-off voices",
+        lighting_mood="dark with blue and amber pools",
+        narrative_note="Where the work is staged.",
+    ),
+
+    "studio_director": RoomDef(
+        room_id="studio_director",
+        display_name="Studio, director's chair",
+        description=(
+            "A bright corner of the studio: the director's chair, a laptop "
+            "cart and a wall of painted sky. Toward the back, a portal "
+            "will lead into PubWorld."
+        ),
+        connects_to=["studio_floor", "pubworld"],
+        background_style="watercolor sky wall, director's chair, steel truss",
+        ambient_sound="quiet room tone",
+        lighting_mood="soft sunrise light",
+        narrative_note="The way into PubWorld.",
+    ),
+
+    "pubworld": RoomDef(
+        room_id="pubworld",
+        display_name="PubWorld",
+        description=(
+            "The voxel world program, entered through the portal in the "
+            "director's-chair view."
+        ),
+        connects_to=["studio_director"],
+        background_style="program view, not a painted room",
+        ambient_sound="",
+        lighting_mood="",
+        narrative_note="A world inside the studio.",
+    ),
+
+    "projection_booth": RoomDef(
+        room_id="projection_booth",
+        display_name="Projection Booth",
+        description=(
+            "Steampunk art-deco booth with a large window onto the "
+            "auditorium. The only projection room."
+        ),
+        connects_to=["lobby_upstairs"],
+        background_style="steampunk art-deco booth, brass, projector window",
+        ambient_sound="projector whir",
+        lighting_mood="amber instrument glow",
+        narrative_note="Where the double feature starts.",
     ),
 }
 

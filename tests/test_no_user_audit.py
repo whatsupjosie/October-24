@@ -20,6 +20,7 @@ def test_legacy_navigation_aliases_resolve_to_real_pages():
         '/studio': 'studio',
         '/byok': 'byok',
         '/map': 'map',
+        '/walk': 'walk',
     }
     for route, marker in expected.items():
         response = client.get(route)

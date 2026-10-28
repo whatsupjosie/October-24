@@ -189,6 +189,7 @@ EXPECTED_HTTP_ROUTES = [
     # Page routes
     "/", "/control", "/stage", "/dressing", "/bar", "/world",
     "/builder", "/gallery", "/analytics", "/launch", "/byok", "/studio",
+    "/walk", "/world-walk",
 ]
 
 EXPECTED_WS_ROUTES = ["/unity/ws/{client_id}", "/studio/ws", "/ws/control", "/ws/{room}"]

@@ -90,6 +90,8 @@ REQUIRED_STATIC_FILES = [
     "dressing_foundry.html", "bar.html", "world.html", "builder.html",
     "gallery.html", "analytics.html", "launch.html", "byok.html",
     "studio_control_room.html",
+    # the walkable world (/walk) and its two scripts
+    "world_walk.html", "world_walk_glb.js", "world_walk_live.js",
     # JS files loaded by control.html for mic pipeline
     "mic_profiles.js", "mic_processor.js", "mic_device_picker.js",
 ]

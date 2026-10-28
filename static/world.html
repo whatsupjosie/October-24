@@ -112,6 +112,13 @@ body {
   color:rgba(230,217,183,.68); font-size:9px; line-height:1.75; letter-spacing:1.1px;
   margin-top:10px;
 }
+#walk-link {
+  position:fixed; top:62px; right:18px; z-index:210;
+  padding:6px 14px; border:1px solid var(--gold-d); color:var(--gold);
+  background:rgba(5,4,3,.82); font-family:var(--font); font-size:9px; letter-spacing:3px;
+  text-decoration:none; cursor:pointer;
+}
+#walk-link:hover, #walk-link:focus-visible { border-color:var(--gold); box-shadow:0 0 14px rgba(201,168,76,.25); outline:none; }
 #atlas-routes {
   display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;
 }
@@ -427,6 +434,8 @@ body {
   <div class="badge" id="company-badge">2.5D MAIN STUDIO</div>
   <div class="badge red">● LIVE</div>
 </div>
+
+<a id="walk-link" href="/walk" title="Walk this room on its own floor, in 2.5D depth">WALK THIS ROOM &rarr;</a>
 
 <!-- HINT -->
 <div id="hint">
@@ -1875,6 +1884,12 @@ document.addEventListener('keydown', e => {
     }
   }
 }, true); // capture so it fires before the room ESC handler
+
+// ── Hop to the walkable world at the same room (the walker resolves the same room ids) ──
+window.addEventListener('pubcast:room', e => {
+  const a = document.getElementById('walk-link');
+  if (a && e.detail && e.detail.room) a.href = '/walk?live=' + encodeURIComponent(e.detail.room);
+});
 
 // ── Start backend connection ──────────────────────────────────────────────
 // Small delay so the page renders first

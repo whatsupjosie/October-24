@@ -10,6 +10,7 @@ PORTAL_PAGES = [
     "world.html", "pubworld_stage.html", "bar.html", "dressing.html",
     "waiting_room.html", "map.html", "pubcast_teleprompter.html", "gallery.html",
     "analytics.html", "doctor.html", "pub_partner_chat.html", "pubpartner.html",
+    "world_walk.html",
 ]
 
 

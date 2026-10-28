@@ -2766,6 +2766,13 @@ async def page_analytics(request: Request):      return _page("analytics.html", 
 @app.get("/world",           include_in_schema=False)
 async def page_world(request: Request):          return _page("world.html", request)
 
+# Bella Faux Pas Studio, the game section of PubCast: the walkable 2.5D world. The same rooms and PubWorld backend as
+# /world, walked on each picture's own floor at its own camera scale (static/world_walk.html, docs/WORLD_WALK.md).
+# ?live=<room id> or ?view=<room>/<view> picks where to start; with neither it starts in the dressing room.
+@app.get("/walk",            include_in_schema=False)
+@app.get("/world-walk",      include_in_schema=False)
+async def page_world_walk(request: Request):     return _page("world_walk.html", request)
+
 @app.get("/stage",           include_in_schema=False)
 async def page_stage(request: Request):          return _page("stage.html", request)
 

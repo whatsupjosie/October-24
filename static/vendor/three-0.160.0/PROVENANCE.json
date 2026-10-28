@@ -17,6 +17,15 @@
   "examples/jsm/loaders/MTLLoader.js": "990757029142686fdcbbaded27207234151a9942469a1aa5417842b302565174",
   "examples/jsm/loaders/OBJLoader.js": "022e0334f837c60506276e136faf3e54b21b20aea672eed4a0c50651d4fc0a5d",
   "examples/jsm/utils/BufferGeometryUtils.js": "9be041e96308775d00e2695cc607645b9a9b64fd7c0e759dd8f7c00a8d92becb",
+  "examples/jsm/utils/SkeletonUtils.js": "83748c5072a5ce96e9d68d8efda908a1f1a06c0b5fd2618edc3e54a361a8fd5b",
   "examples/jsm/utils/TextureUtils.js": "1b84a7fde8745dd614f62b6ca8108b592144278c07891a0cbe8cdf8e15796efa"
- }
+ },
+ "added": [
+  {
+   "file": "examples/jsm/utils/SkeletonUtils.js",
+   "date": "2026-10-27",
+   "from": "npm registry three@0.160.0 (same release; GLTFLoader.js, BufferGeometryUtils.js and build/three.module.js are byte-identical to this folder's copies)",
+   "why": "The Bella Faux Pas Studio walker clones rigged GLB avatars (static/world_walk_glb.js)."
+  }
+ ]
 }
