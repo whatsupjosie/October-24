@@ -1974,6 +1974,8 @@ app.include_router(_avatar_imports)
 # Bella Faux Pas Studio progress (room, spot, who you walk as, your avatars, size tuning), per owner on this host.
 from modules.studio_progress import create_studio_progress_router  # noqa: E402
 app.include_router(create_studio_progress_router(DATA_DIR))
+from modules.counter_layout import create_counter_layout_router  # noqa: E402
+app.include_router(create_counter_layout_router(DATA_DIR))
 app.state.foresight_stop_sessions = _foresight_host_tools.stop_owned_sessions
 
 

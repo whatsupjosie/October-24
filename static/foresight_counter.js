@@ -837,7 +837,14 @@
         contents: t.stack.map(c => ({type: c.type, data: c.data, state: serializeContent(c)}))}))};
     }
     let saveTimer = null;
-    function saveCounter(){ if(!storageKey) return false; try{ localStorage.setItem(storageKey, JSON.stringify(serialize())); return true; }catch(e){ return false; } }
+    // opt.onSave(layout, keepalive) also gets every saved layout, so the page can keep a copy on the Reach host
+    function saveCounter(keepalive){
+      if(!storageKey) return false;
+      let data, ok=false;
+      try{ data=serialize(); localStorage.setItem(storageKey, JSON.stringify(data)); ok=true; }catch(e){}
+      if(data && typeof opt.onSave==='function'){ try{ opt.onSave(data, keepalive===true); }catch(e){ console.error('Counter layout copy failed', e); } }
+      return ok;
+    }
     function scheduleSave(){ if(!storageKey) return; clearTimeout(saveTimer); saveTimer = setTimeout(saveCounter, 400); }
     function restore(data){
       if(!data || !Array.isArray(data.trays)) return false;
@@ -1004,7 +1011,7 @@
     addEventListener('keydown', onKey);
     const onResize = () => { dirty = true; settle = 60; };
     addEventListener('resize', onResize);
-    const flushSave = () => { clearTimeout(saveTimer); saveCounter(); };
+    const flushSave = () => { clearTimeout(saveTimer); saveCounter(true); };
     const onVisibility = () => {
       if(document.visibilityState==='hidden'){
         flushSave();if(raf){cancelAnimationFrame(raf);raf=0}
@@ -1157,7 +1164,7 @@
       // lay trays out from a list (used on first start); each spec: {id, contents:[{type,data}], x, y, w?, h?, family?, look?}
       layout(specs){ for(const s of specs){ const t = buildTray(s); t.home = [s.x, s.y]; trays.push(t); } dirty = true; settle = 120; },
       restore(data){ return restore(data || load()); },
-      saveNow: saveCounter,
+      saveNow: () => saveCounter(),
       start(){if(!started){started=true;if(document.visibilityState!=='hidden')raf=requestAnimationFrame(frame)}},
       settle(n){ const c = ctx(), env = physEnv(c); trays.forEach(t => { if(!t.hidden) Ch.attach(t, S); }); for(let k = 0; k < (n || 300); k++){ Ch.step(trays, env); Ch.squeeze(trays, env, S); } },
       destroy(){

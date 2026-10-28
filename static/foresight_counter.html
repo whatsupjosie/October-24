@@ -190,12 +190,56 @@ function ask({title, sub = '', placeholder = '', value = '', validate = null, in
   });
 }
 
+// ---------------------------------------------------------------- the layout's copy on the Reach host
+// The browser copy (localStorage) stays as it was. Each save also goes to the host, so the layout survives cleared site
+// data or a different browser; on start the newer of the two copies is used. Only while signed in (enabled in boot).
+const hostLayout = (() => {
+  const URL_ = '/api/foresight/counter-layout';
+  let on = false, last = '', pending = null, timer = 0, inflight = false, stampKey = null;
+  async function put(keepalive){
+    if(!pending || inflight) return;
+    const body = pending; pending = null; inflight = true;
+    try{
+      const r = await fetch(URL_, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body, keepalive: !!keepalive && body.length < 60000});
+      if(!r.ok) throw Error('HTTP ' + r.status);
+      last = body; hostLayout.saved = Date.now(); hostLayout.revision = (await r.json()).revision;
+    }catch(err){
+      if(!pending) pending = body;                       // keep it and try again shortly
+      clearTimeout(timer); timer = setTimeout(() => put(false), 5000);
+    }finally{ inflight = false; if(pending && !timer) put(false); }
+  }
+  return {
+    saved: 0, revision: 0,
+    enable(key){ on = true; stampKey = key + ':saved_at'; },
+    stamp(){ try{ return +localStorage.getItem(stampKey) || 0; }catch(e){ return 0; } },
+    save(layout, keepalive){
+      if(!on) return;
+      const at = Date.now();
+      try{ localStorage.setItem(stampKey, String(at)); }catch(e){}
+      const body = JSON.stringify({layout, client_saved_at: at});
+      if(body === last || body === pending) return;
+      pending = body; clearTimeout(timer); timer = 0;
+      if(keepalive) put(true); else timer = setTimeout(() => { timer = 0; put(false); }, 600);
+    },
+    async load(){
+      try{
+        const r = await fetch(URL_);
+        if(!r.ok) return null;
+        const j = await r.json(); hostLayout.revision = j.revision || 0;
+        return j.layout ? {layout: j.layout, at: +j.client_saved_at || (j.saved_at || 0) * 1000} : null;
+      }catch(e){ return null; }
+    },
+  };
+})();
+window.__hostLayout = hostLayout;
+
 // ---------------------------------------------------------------- the counter and its programs
 const programs = ForesightPrograms.create({toast: t => counter && counter.toast(t), ask});
 counter = ForesightCounter.create({canvas, gl: G, provider: programs.provider, theme: look.theme, top: 70,
   // Bella Faux Pas, the game section of PubCast, has its own blade on the fan (Josie, 2026-10-27)
   blades: [{label: 'Bella Faux Pas', run: () => programs.open('bella_faux_pas')}],
   storageKey: null, looks: frameLook,
+  onSave: (layout, keepalive) => hostLayout.save(layout, keepalive),
   onEvent: () => { updateHint(); },
   confirmDiscard: async titles => {
     const info=document.createElement('div');
@@ -464,7 +508,17 @@ async function boot(){
   refreshDots(); setInterval(refreshDots, 6000);
   // Unscoped legacy layouts and file bytes remain untouched. Their owner is
   // unknown, so never auto-import them into whichever account signs in next.
-  const saved = params.has('fresh') ? null : (() => { try{ return JSON.parse(localStorage.getItem(layoutKey) || 'null'); }catch(e){ return null; } })();
+  let saved = params.has('fresh') ? null : (() => { try{ return JSON.parse(localStorage.getItem(layoutKey) || 'null'); }catch(e){ return null; } })();
+  if(!params.has('nosave')){
+    hostLayout.enable(layoutKey);
+    // the copy kept on the host wins when this browser has none, or when the host's is newer (saved from elsewhere)
+    const host = params.has('fresh') ? null : await hostLayout.load();
+    if(host && (!saved || host.at > hostLayout.stamp())){
+      saved = host.layout;
+      try{ localStorage.setItem(layoutKey, JSON.stringify(saved)); localStorage.setItem(layoutKey + ':saved_at', String(host.at)); }catch(e){}
+    }
+    else if(saved && (!host || host.at < hostLayout.stamp())) hostLayout.save(saved);   // this browser's copy is newer: give the host it
+  }
   // New workspaces start empty; retain existing saved arrangements unchanged.
   if(saved) counter.restore(saved);
   updateHint();

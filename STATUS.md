@@ -13,7 +13,8 @@ Ledger: `handoffs/SAVING_2026-10-28.md`.
 - **Bella Faux Pas progress** is now saved on the host per owner (`modules/studio_progress.py`, `/api/studio/progress`). It covers room, spot, who you walk as, your library avatar for each character, hologram, size tuning and cans.
   - The studio can wear avatars from the avatar library.
   - `tests/test_bella_faux_pas_progress.py` quits and restarts `run_reach.py` and checks that all of it comes back: 11 passed.
-- **Not done yet:** a host copy of the Counter layout, cartridge creation in PubPartner, and one restart test across every save.
+- **Counter layout** is now also kept on the host per owner (`/api/foresight/counter-layout`), and the newer copy is used on start. It comes back after a restart in a fresh browser. `tests/test_foresight_counter_layout_host.py`: 9 passed.
+- **Not done yet:** cartridge creation in PubPartner, and one restart test across every save.
 
 ## 2026-10-27: Bella Faux Pas Studio (walkable world) integrated
 

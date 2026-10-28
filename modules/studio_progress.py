@@ -83,8 +83,10 @@ def validate(body: Any) -> Dict[str, Any]:
 
 
 class StudioProgressStore:
-    def __init__(self, data_dir: Path):
-        self.root = Path(data_dir) / "studio_progress"
+    """One JSON record per owner in data_dir/<folder>/, revisioned and replaced atomically. Also used for the Counter
+    layout (modules/counter_layout.py)."""
+    def __init__(self, data_dir: Path, folder: str = "studio_progress"):
+        self.root = Path(data_dir) / folder
         self._lock = threading.Lock()
 
     def path_for(self, owner: str) -> Path:
@@ -101,13 +103,16 @@ class StudioProgressStore:
             return None                      # unreadable: treat as no progress rather than break the studio
         return data if isinstance(data, dict) else None
 
-    def put(self, owner: str, progress: Dict[str, Any], expected_revision: Optional[int] = None) -> Dict[str, Any]:
+    def put(self, owner: str, progress: Dict[str, Any], expected_revision: Optional[int] = None,
+            extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         with self._lock:
             current = self.get(owner) or {}
             revision = int(current.get("revision") or 0)
             if expected_revision is not None and expected_revision != revision:
                 raise RevisionConflict(revision)
             record = {"owner": owner, "revision": revision + 1, "saved_at": time.time(), "progress": progress}
+            if extra:
+                record.update({k: v for k, v in extra.items() if k not in record})
             self.root.mkdir(parents=True, exist_ok=True)
             p = self.path_for(owner)
             tmp = p.with_suffix(".json.tmp")
