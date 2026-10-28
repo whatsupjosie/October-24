@@ -5,6 +5,14 @@ Foresight inside this Build. It is **not** a declaration that all of PubCast is
 finished. Never treat a file, route, recovered donor, or test fixture as proof
 of live functionality.
 
+## 2026-10-28: the airlock (backend only)
+
+Ledger: `handoffs/AIRLOCK_2026-10-28.md`.
+
+- **What's in:** the waiver signed by the owner and the AI, the host's avatar requirements, and the guest and detention sides. Also timeouts with re-signing, warning → timeout → boot, the staff pass, the host-left return, sealed thought records opened only by incident, and the tally rules. This is `modules/airlock.py` and `/api/airlock/*`. 39 tests pass, and the real app boots with it.
+- **Approval change:** the older governance approve route is now gated by the waiver.
+- **Not done:** there is no airlock UI yet, so `waiting_room.html` can't admit anyone until it is updated. The waiver text is a draft for Josie.
+
 ## 2026-10-28: saving across PubCast (in progress)
 
 Ledger: `handoffs/SAVING_2026-10-28.md`.

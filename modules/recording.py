@@ -749,6 +749,10 @@ def create_recording_service(base_dir: Path, cameras: CameraManager, blackbox_wi
             "conference": {"recording": "host_policy", "notice": "Recording policy defined by meeting host."},
             "studio": {"recording": "expected", "notice": "Production area"},
             "dressing": {"recording": "never", "notice": "Private space"},
+            # Airlock (modules/airlock.py): guests change bodies in the foundry,
+            # so it is private like the dressing room; detention is always recorded.
+            "guest_foundry": {"recording": "never", "notice": "Private space"},
+            "detention": {"recording": "expected", "notice": "On a timeout. Everything here is recorded."},
         }
     )
     return service

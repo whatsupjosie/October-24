@@ -20,7 +20,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from modules.governance import (
-    GovernanceEngine, BanType, ConsentType, EntryStatus,
+    AdmissionBlocked, GovernanceEngine, BanType, ConsentType, EntryStatus,
 )
 from modules.route_security import bound_actor, require_role
 
@@ -256,7 +256,10 @@ def create_governance_router(gov: GovernanceEngine, hub: Any = None, authority_b
     async def approve_entry(entry_id: str, request: Request, identity: Dict[str, Any] = Depends(require_role("mod"))):
         body = await _json_dict(request)
         approved_by = bound_actor(request=request, identity=identity, explicit_value=body.get("approved_by"), field_name="approved_by")
-        entry = gov.approve_entry(entry_id, approved_by)
+        try:
+            entry = gov.approve_entry(entry_id, approved_by)
+        except AdmissionBlocked as exc:
+            raise HTTPException(409, str(exc))
         if not entry:
             raise HTTPException(404, "Entry not found or already resolved")
         if hub:

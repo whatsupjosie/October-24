@@ -39,9 +39,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger("pubcast.governance")
+
+
+class AdmissionBlocked(PermissionError):
+    """An approval was refused by the installed admission gate."""
 
 
 # ─── Enums ─────────────────────────────────────────────────────────────────────
@@ -492,11 +496,29 @@ class GovernanceEngine:
                      f"room={target_room}, name={display_name}")
         return entry
 
+    def set_admission_gate(self, gate: Optional[Callable[[str], Tuple[bool, str]]]) -> None:
+        """Install a check every approval must pass (the airlock's waiver gate).
+
+        Without it, this route would be a way around the waiver. The gate takes
+        a user id and returns (allowed, reason).
+        """
+        self._admission_gate = gate
+
     def approve_entry(self, entry_id: str, approved_by: str) -> Optional[WaitingRoomEntry]:
-        """Host approves a waiting room request."""
+        """Host approves a waiting room request.
+
+        Raises AdmissionBlocked when an installed admission gate refuses.
+        """
         entry = self._waiting_room.get(entry_id)
         if not entry or entry.status != EntryStatus.WAITING:
             return None
+        gate = getattr(self, "_admission_gate", None)
+        if gate is not None:
+            allowed, reason = gate(entry.user_id)
+            if not allowed:
+                self._audit("APPROVE_BLOCKED", approved_by, entry.user_id,
+                            f"room={entry.target_room}, reason={reason}")
+                raise AdmissionBlocked(reason)
         entry.status = EntryStatus.APPROVED
         entry.resolved_by = approved_by
         entry.resolved_at = time.time()

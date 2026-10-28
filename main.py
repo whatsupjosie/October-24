@@ -1209,6 +1209,28 @@ async def lifespan(application: FastAPI):
     application.include_router(create_governance_router(governance, hub, authority_bridge=alex_bridge, authority_store=pub_manager_authority))
     logger.info("[7/12] Governance ready — bans, freeze, consent, waiting room")
 
+    # 7a. Airlock — waiver signed by owner and AI, host avatar requirements,
+    # guest/detention sides, timeouts and the ladder, sealed thought records.
+    # It also gates the older approve route so nothing gets around the waiver.
+    try:
+        from modules.airlock import AirlockEngine
+        from modules.airlock_routes import create_airlock_router
+
+        def _load_library_avatar(avatar_id: str):
+            entry = _avatar_imports.store.get(avatar_id)
+            if entry is None:
+                raise KeyError(avatar_id)
+            data = _avatar_imports.store.path_for(avatar_id).read_bytes()
+            return data, entry.get("canonical_height_in"), str(entry.get("owner") or "")
+
+        airlock = AirlockEngine(DATA_DIR, governance, avatar_loader=_load_library_avatar)
+        governance.set_admission_gate(airlock.is_cleared_anywhere)
+        application.state.airlock = airlock
+        application.include_router(create_airlock_router(airlock, hub))
+        logger.info("[7a] Airlock ready — waiver %s, detention, sealed records", airlock.waiver.version)
+    except Exception as exc:
+        logger.warning("[7a] Airlock failed: %s", exc)
+
     # 7b. PubWorld Hotspot API
     try:
         hotspot_router = create_hotspot_router(DATA_DIR)
