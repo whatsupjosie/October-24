@@ -5,6 +5,14 @@ Foresight inside this Build. It is **not** a declaration that all of PubCast is
 finished. Never treat a file, route, recovered donor, or test fixture as proof
 of live functionality.
 
+## 2026-10-29: Control page integration and host control
+
+Ledgers: `handoffs/CONTROL_PAGE_INTEGRATION_2026-10-29.md`, `HOST_CONTROL_SERVER_2026-10-29.md`, `KEYMAP_2026-10-29.md`, `CAMERA_CONTROL_MODES_2026-10-29.md`.
+
+- The Control page's Vision Mixer (Cut, Fade, sources, Preview, Program) now works and takes assignable keys; a Camera station moves a real camera and records, saves and replays moves exactly.
+- Host control server half (possession, timeout, profile, gifts, tracker log) and the walker's reaction to it. No roster or panel yet.
+- Real-browser tests against the real app pass for all of the above; see the ledgers for what is untested.
+
 ## 2026-10-28: saving across PubCast (in progress)
 
 Ledger: `handoffs/SAVING_2026-10-28.md`.

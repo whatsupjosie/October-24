@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from .route_security import require_role
 from .cameras import CameraManager
 from .director_engine import AutonomousDirector
 
@@ -28,6 +30,22 @@ class SwitcherService:
         return self.cut(camera_id)
 
 
+def _checked_pose(body:Dict[str,Any])->Dict[str,Any]:
+    """Only finite numbers in range get through; anything else is a 400 before any camera is touched."""
+    def nums(key,n,limit):
+        v=body.get(key)
+        if v is None: return None
+        if not (isinstance(v,list) and len(v)==n and all(isinstance(x,(int,float)) and not isinstance(x,bool) and math.isfinite(x) and abs(x)<=limit for x in v)):
+            raise HTTPException(400,f"{key} must be {n} finite numbers between -{limit:g} and {limit:g}")
+        return [float(x) for x in v]
+    def one(key):
+        v=body.get(key)
+        if v is None: return None
+        if isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v): raise HTTPException(400,f"{key} must be a finite number")
+        return float(v)
+    return {"position":nums("position",3,10000),"rotation":nums("rotation",3,3600),"fov":one("fov"),"focus":one("focus")}
+
+
 def create_switcher_router(service:SwitcherService)->APIRouter:
     r=APIRouter(prefix="/api/switcher",tags=["Director Switcher"])
     @r.get("/state")
@@ -51,10 +69,20 @@ def create_switcher_router(service:SwitcherService)->APIRouter:
             raise HTTPException(404,"camera not found or preview unset")
         return service.state()
     @r.post("/ptz/{camera_id}")
-    async def ptz(camera_id:str,body:Dict[str,Any]):
-        ok=service.cameras.update_pose(camera_id,position=body.get("position"),rotation=body.get("rotation"),fov=body.get("fov"))
+    async def ptz(camera_id:str,body:Dict[str,Any],identity:Dict[str,Any]=Depends(require_role("mod"))):
+        """Move a camera: position [x,y,z] metres (y up), rotation [tilt,pan,roll] degrees, fov degrees, focus metres.
+        Any of them may be sent alone. Every number is checked here, so a bad request changes nothing."""
+        pose=_checked_pose(body)
+        try: ok=service.cameras.update_pose(camera_id,**pose)
+        except ValueError as exc: raise HTTPException(400,str(exc)) from None
         if not ok: raise HTTPException(404,"camera not found")
-        return service.state()
+        src=service.cameras.get(camera_id)
+        return {**service.state(),"pose":{"position":list(src.position),"rotation":list(src.rotation),"fov":src.fov,"focus":getattr(src,"focus",None)}}
+    @r.get("/pose/{camera_id}")
+    async def pose(camera_id:str):
+        src=service.cameras.get(camera_id)
+        if src is None: raise HTTPException(404,"camera not found")
+        return {"camera_id":camera_id,"position":list(src.position),"rotation":list(src.rotation),"fov":src.fov,"focus":getattr(src,"focus",None)}
     @r.get("/scenes")
     async def scenes(): return {"scenes":service.scenes}
     return r

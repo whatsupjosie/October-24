@@ -158,3 +158,13 @@ test('lens terms: millimetres and field of view convert both ways, and blur grow
   assert.ok(R.blurPx(85, 2.8, 5, 9, 1080) > R.blurPx(35, 2.8, 5, 9, 1080));                           // a longer lens is shallower
   for (const bad of [[0, 2.8, 5, 5], [50, 0, 5, 5], [50, 2.8, -1, 5], [50, 2.8, 5, NaN]]) assert.strictEqual(R.blurPx(...bad, 1080), 0);
 });
+
+
+test('the camera station is described once: every action has a label and a default key, they never collide, and held actions drive the same speeds as held keys', () => {
+  const spec = R.keymapSpec(); assert.strictEqual(Object.keys(spec).length, R.ACTIONS.length);
+  const KM = require('../static/keymap.js'); const km = KM.create({ camera: spec });             // throws if a default is reserved or doubled
+  assert.strictEqual(km.bindings('camera').pan_left, 'ArrowLeft'); assert.strictEqual(km.def('camera', 'zoom_in').kind, 'hold');
+  const p = R.newPose({ pan: 0.4 });
+  assert.deepStrictEqual(R.fromActions(p, ['move_forward', 'pan_right', 'zoom_in']), R.fromKeys(p, ['KeyW', 'ArrowRight', 'BracketRight']));
+  assert.deepStrictEqual(R.fromActions(p, ['nope']), {}); assert.deepStrictEqual(R.fromActions(p, ['move_left', 'move_right']), { x: 0, y: 0, z: 0 });
+});

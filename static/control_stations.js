@@ -127,7 +127,8 @@ document.getElementById('mixer-apply')?.addEventListener('click', () => {
 });
 
 // ── Keyboard shortcuts (Space/C = Cut, F = Fade) ──────────────────────────────
-document.addEventListener('keydown', e => {
+// Pages that load the shared key map (static/control_keys.js) get their keys from it, so this fixed set steps aside there.
+if (!window.PubCastControlKeys) document.addEventListener('keydown', e => {
   if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
   if (e.code==='Space'||e.key==='c'||e.key==='C') { e.preventDefault(); document.getElementById('vm-cut')?.click(); }
   if (e.key==='f'||e.key==='F') { e.preventDefault(); document.getElementById('vm-take')?.click(); }

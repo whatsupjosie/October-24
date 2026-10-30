@@ -104,10 +104,14 @@ test('a spec with a bad default or a doubled default is refused at creation', ()
 });
 
 function fakeDoc() {
-  let fn = null; const doc = { addEventListener: (t, f, cap) => { assert.strictEqual(t, 'keydown'); assert.strictEqual(cap, true); fn = f; } };
-  const press = (e) => { const ev = Object.assign({ code: 'Space', target: { tagName: 'BODY' }, prevented: false, stopped: false,
-    preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }, e); fn(ev); return ev; };
-  return { doc, press };
+  const fns = {}, wins = {};
+  const doc = { addEventListener: (ty, f, cap) => { assert.strictEqual(cap, true); fns[ty] = f; }, defaultView: { addEventListener: (ty, f) => { wins[ty] = f; } } };
+  const mk = e => Object.assign({ code: 'Space', target: { tagName: 'BODY' }, prevented: false, stopped: false,
+    preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } }, e);
+  const press = e => { const ev = mk(e); fns.keydown(ev); return ev; };
+  const release = e => { const ev = mk(e); fns.keyup(ev); return ev; };
+  const blur = () => wins.blur();
+  return { doc, press, release, blur };
 }
 
 test('the keyboard listener acts only while a station is open, stops other handlers when it uses a key, and leaves typing and shortcuts alone', () => {
@@ -132,4 +136,32 @@ test('the module answers "is any station open?" across keymaps, which is what th
   b.open('two'); assert.strictEqual(KM.isOpen(), true); assert.strictEqual(KM.activeStation(), 'two');
   b.close(); a.open('one'); assert.strictEqual(KM.activeStation(), 'one');
   a.close(); assert.strictEqual(KM.isOpen(), false);
+});
+
+
+test('the arrows are kept for faders only at stations that have one, so the camera can use them for tilt and pan', () => {
+  const km = KM.create({ cam: { tilt_up: { label: 'Tilt up', kind: 'hold', key: 'ArrowUp' }, tilt_down: { label: 'Tilt down', kind: 'hold', key: 'ArrowDown' } },
+                         mix: { vol: { label: 'Volume', kind: 'fader', key: 'KeyV' } } });
+  assert.strictEqual(km.bindings('cam').tilt_up, 'ArrowUp');
+  assert.deepStrictEqual(km.assign('cam', 'tilt_up', 'ArrowLeft'), { ok: true });
+  assert.deepStrictEqual(km.assign('mix', 'vol', 'ArrowUp'), { ok: false, reason: 'reserved' });
+  assert.throws(() => KM.create({ mix: { a: { kind: 'fader', key: 'KeyA' }, b: { key: 'ArrowDown' } } }), /reserved/);
+});
+
+test('a held control acts for as long as its key is down: repeat does not press it again, any number at once, release on key up, blur, close and reassignment', () => {
+  const km = KM.create({ cam: { pan_left: { label: 'Pan left', kind: 'hold', key: 'ArrowLeft' }, pan_right: { label: 'Pan right', kind: 'hold', key: 'ArrowRight' },
+                                zoom_in: { label: 'Zoom in', kind: 'hold', key: 'BracketRight' } }, sw: { cut: { label: 'Cut', key: 'Space' } } });
+  const log = []; km.onHold((s, a, d) => log.push(`${a}:${d ? 'down' : 'up'}`));
+  const { doc, press, release, blur } = fakeDoc(); km.attach(doc);
+  km.open('cam');
+  press({ code: 'ArrowLeft' }); press({ code: 'ArrowLeft' }); press({ code: 'BracketRight' });          // a repeat, then a second control at once
+  assert.deepStrictEqual(log, ['pan_left:down', 'zoom_in:down']); assert.deepStrictEqual(km.held('cam').sort(), ['pan_left', 'zoom_in']);
+  release({ code: 'ArrowLeft' }); assert.deepStrictEqual(km.held('cam'), ['zoom_in']); assert.strictEqual(log.at(-1), 'pan_left:up');
+  blur(); assert.deepStrictEqual(km.held('cam'), []); assert.strictEqual(log.at(-1), 'zoom_in:up');         // losing focus never leaves a key stuck down
+  press({ code: 'ArrowRight' }); km.close(); assert.deepStrictEqual(km.held('cam'), []); assert.strictEqual(log.at(-1), 'pan_right:up');
+  km.open('cam'); press({ code: 'ArrowRight' }); km.open('sw'); assert.strictEqual(log.at(-1), 'pan_right:up');   // moving to another station lets go too
+  km.open('cam'); press({ code: 'BracketRight' }); km.assign('cam', 'zoom_in', 'KeyZ'); release({ code: 'BracketRight' });
+  assert.deepStrictEqual(km.held('cam'), [], 'a key reassigned while held is still released when its old key comes up');
+  assert.strictEqual(km.ask('cam', 'pan_left'), 'Where would you like the Pan left button?');
+  assert.strictEqual(km.press('cam', 'KeyJ').learn.ok, true); assert.strictEqual(km.bindings('cam').pan_left, 'KeyJ');
 });

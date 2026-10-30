@@ -1979,6 +1979,8 @@ from modules.studio_progress import create_studio_progress_router  # noqa: E402
 app.include_router(create_studio_progress_router(DATA_DIR))
 from modules.keymap_store import create_keymap_router  # noqa: E402
 app.include_router(create_keymap_router(DATA_DIR))          # per-person key assignments (static/keymap.js)
+from modules.camera_moves import create_camera_moves_router  # noqa: E402
+app.include_router(create_camera_moves_router(DATA_DIR))    # saved, repeatable camera moves (static/camera_rig.js)
 from modules.counter_layout import create_counter_layout_router  # noqa: E402
 app.include_router(create_counter_layout_router(DATA_DIR))
 # New PubPartner cartridges (pubpartner/cartridge.py init_cartridge), each registered as a friend; never the Alex vessel.

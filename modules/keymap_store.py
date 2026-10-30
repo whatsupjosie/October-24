@@ -20,7 +20,7 @@ from .route_security import current_identity
 from .studio_progress import RevisionConflict, StudioProgressStore, _owner
 
 MAX_BYTES = 64 * 1024
-RESERVED = frozenset({"Escape", "F5", "F11", "F12", "Tab", "ArrowUp", "ArrowDown"})      # same list as RESERVED in static/keymap.js
+RESERVED = frozenset({"Escape", "F5", "F11", "F12", "Tab"})      # same list as RESERVED in static/keymap.js (Up and Down are kept per station by the browser, which knows which have faders)
 _MODIFIER = re.compile(r"^(Shift|Control|Alt|Meta|OS)(Left|Right)?$|^(CapsLock|NumLock|ScrollLock|ContextMenu|Fn)$")
 _CODE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,23}$")
 _ID = re.compile(r"^[a-z][a-z0-9_]{0,39}$")

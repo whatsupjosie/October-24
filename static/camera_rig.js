@@ -101,22 +101,37 @@ const wrap = a => { a %= TAU; return a < 0 ? a + TAU : a; };
 
   /* ---- ways to drive it. Each turns what the operator is doing into wanted speeds. ---- */
 
-  /* A. held keys: every channel has a key pair, any number held at once */
-  const KEYS = { KeyA: ["move", "right", -1], KeyD: ["move", "right", 1], KeyW: ["move", "fwd", 1], KeyS: ["move", "fwd", -1], KeyE: ["move", "up", 1], KeyQ: ["move", "up", -1],
-                 ArrowLeft: ["pan", -1], ArrowRight: ["pan", 1], ArrowUp: ["tilt", 1], ArrowDown: ["tilt", -1],
-                 BracketRight: ["fov", -1], BracketLeft: ["fov", 1], Comma: ["roll", -1], Period: ["roll", 1], Quote: ["focus", 1], Semicolon: ["focus", -1] };
-  function fromKeys(pose, held) {
+  /* A. held keys. The camera's controls are ACTIONS, each with a label and a default key, and the key map assigns the keys;
+        fromActions turns whatever is held into wanted speeds. Any number can be held at once. */
+  const ACTIONS = [
+    ["move_right", "Truck right", "KeyD", "move", "right", 1], ["move_left", "Truck left", "KeyA", "move", "right", -1],
+    ["move_forward", "Dolly in", "KeyW", "move", "fwd", 1], ["move_back", "Dolly out", "KeyS", "move", "fwd", -1],
+    ["move_up", "Pedestal up", "KeyE", "move", "up", 1], ["move_down", "Pedestal down", "KeyQ", "move", "up", -1],
+    ["pan_right", "Pan right", "ArrowRight", "pan", 1], ["pan_left", "Pan left", "ArrowLeft", "pan", -1],
+    ["tilt_up", "Tilt up", "ArrowUp", "tilt", 1], ["tilt_down", "Tilt down", "ArrowDown", "tilt", -1],
+    ["roll_right", "Roll right", "Period", "roll", 1], ["roll_left", "Roll left", "Comma", "roll", -1],
+    ["zoom_in", "Zoom in", "BracketRight", "fov", -1], ["zoom_out", "Zoom out", "BracketLeft", "fov", 1],
+    ["focus_far", "Focus farther", "Quote", "focus", 1], ["focus_near", "Focus nearer", "Semicolon", "focus", -1],
+  ];
+  const BY_ACTION = {}; for (const a of ACTIONS) BY_ACTION[a[0]] = a;
+  function fromActions(pose, actions) {
     const w = {}, ax = axes(pose);
-    for (const code of held) {
-      const k = KEYS[code]; if (!k) continue;
-      if (k[0] === "move") { const d = ax[k[1]], s = SPEED.move * k[2]; w.x = (w.x || 0) + d[0] * s; w.y = (w.y || 0) + d[1] * s; w.z = (w.z || 0) + d[2] * s; }
-      else w[k[0]] = (w[k[0]] || 0) + SPEED[k[0]] * k[1];
+    for (const id of actions) {
+      const a = BY_ACTION[id]; if (!a) continue;
+      if (a[3] === "move") { const d = ax[a[4]], s = SPEED.move * a[5]; w.x = (w.x || 0) + d[0] * s; w.y = (w.y || 0) + d[1] * s; w.z = (w.z || 0) + d[2] * s; }
+      else w[a[3]] = (w[a[3]] || 0) + SPEED[a[3]] * a[4 + (a[3] === "move" ? 1 : 0)];
     }
     return w;
   }
+  /* default keys by code (arrows, WASD, brackets ...), for the try page and tests; the program uses fromActions with the key map */
+  const KEYS = {}; for (const a of ACTIONS) KEYS[a[2]] = a[0];
+  const fromKeys = (pose, held) => fromActions(pose, [...held].map(c => KEYS[c]).filter(Boolean));
+  /* what the key map needs to know about the camera station: id, label, the kind of control, default key */
+  const keymapSpec = () => { const o = {}; for (const a of ACTIONS) o[a[0]] = { label: a[1], kind: "hold", key: a[2] }; return o; };
+
   /* B. mouse for aim: movement since the last step becomes a speed (analogue, so slow and fast both work); wheel zooms, shift-wheel pulls focus; keys still move */
   function fromMouse(pose, held, mouse, dt, sens) {
-    const w = fromKeys(pose, [...held].filter(c => !KEYS[c] || KEYS[c][0] === "move"));
+    const w = fromKeys(pose, [...held].filter(c => !KEYS[c] || /^move_/.test(KEYS[c])));
     const k = (sens || 0.0025) / Math.max(dt, 1e-3);
     w.pan = (mouse.dx || 0) * k; w.tilt = -(mouse.dy || 0) * k;
     if (mouse.wheel) { if (mouse.shift) w.focus = mouse.wheel * 4; else w.fov = mouse.wheel * 40 * DEG; }
@@ -126,7 +141,7 @@ const wrap = a => { a %= TAU; return a < 0 ? a + TAU : a; };
         offset holds it off-centre. zone = {w, h} is the DEAD ZONE (fractions of the half-frame): while the subject stays inside it
         the camera does not turn, so small movements do not make the picture twitch; just outside it a soft zone eases the aim back. */
   function fromLock(pose, held, subject, offset, zone) {
-    const w = fromKeys(pose, [...held].filter(c => !KEYS[c] || KEYS[c][0] === "move" || KEYS[c][0] === "fov"));
+    const w = fromKeys(pose, [...held].filter(c => !KEYS[c] || /^move_|^zoom_/.test(KEYS[c])));
     const a = aimAt(pose, subject), off = offset || { pan: 0, tilt: 0 }, q = project(pose, subject);
     const soft = (v, dz) => (dz > 0 ? clamp((Math.abs(v) - dz) / 0.25, 0, 1) : 1);
     const kx = zone && q.ok ? soft(q.sx, zone.w || 0) : 1, ky = zone && q.ok ? soft(q.sy, zone.h || 0) : 1;
@@ -183,5 +198,5 @@ const wrap = a => { a %= TAU; return a < 0 ? a + TAU : a; };
     return c / (sensorH || SENSOR_H) * heightPx;
   }
 
-  return { create, project, aimAt, axes, fromKeys, fromMouse, fromLock, fromOrbit, pullFocus, shotPose, focalToFov, fovToFocal, blurPx, LENSES, SUB, playback, newPose, turn, wrap, CH, KEYS, SPEED, LIMITS, DEG };
+  return { create, project, aimAt, axes, fromKeys, fromActions, keymapSpec, ACTIONS, fromMouse, fromLock, fromOrbit, pullFocus, shotPose, focalToFov, fovToFocal, blurPx, LENSES, SUB, playback, newPose, turn, wrap, CH, KEYS, SPEED, LIMITS, DEG };
 });

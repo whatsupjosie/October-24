@@ -8,7 +8,7 @@
  *   - Keys are KeyboardEvent.code values (the physical key), so a layout works on any keyboard. No modifiers.
  *   - The station's own on-screen controls are fixed. Only the keys are assigned. Ask "where would you like the Cut button?"
  *     with ask(station, action); the next key pressed (or clicked on the overlay) is the answer.
- *   - Esc, F5, F11, F12, Tab, Up and Down can never be assigned (Esc leaves, the browser needs the others, Up and Down step faders).
+ *   - Esc, F5, F11, F12 and Tab can never be assigned (Esc leaves, the browser needs the others). Up and Down are also kept at any station with a fader, where they step it.
  *   - A key already in use at that station is reported, not taken: press it again (or call assign with replace) to take it over.
  *
  * Works in a browser (window.PubCastKeymap) and in Node (module.exports), so the logic is tested without a browser.
@@ -19,22 +19,24 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const RESERVED = new Set(["Escape", "F5", "F11", "F12", "Tab", "ArrowUp", "ArrowDown"]);
+  const RESERVED = new Set(["Escape", "F5", "F11", "F12", "Tab"]);
+  const FADER_KEYS = new Set(["ArrowUp", "ArrowDown"]);        // reserved only at a station that has a fader, where they step the selected one
   const MODIFIER = /^(Shift|Control|Alt|Meta|OS)(Left|Right)?$|^(CapsLock|NumLock|ScrollLock|ContextMenu|Fn)$/;
   const CODE = /^[A-Za-z][A-Za-z0-9]{0,23}$/;
   const ID = /^[a-z][a-z0-9_]{0,39}$/;
 
   const instances = [];            // every keymap made on this page, so "is anyone sitting at a station?" has one answer
 
-  /* spec: { station: { action: { label, kind: "button" | "fader", key: "Space" | null, min, max, step, value } } } */
+  /* spec: { station: { action: { label, kind: "button" | "hold" | "fader", key: "Space" | null, min, max, step, value } } }
+     button: acts when pressed. hold: acts for as long as the key is held (camera axes: any number at once). fader: key selects, Up / Down step. */
   function create(spec) {
-    const defs = {}, bind = {}, values = {}, listeners = [], handlers = { button: null, fader: null };
+    const defs = {}, bind = {}, values = {}, listeners = [], handlers = { button: null, fader: null, hold: null }, down = new Map();   // "station.action" -> the key that is holding it, for every hold control now held
     for (const [st, actions] of Object.entries(spec || {})) {
       if (!ID.test(st)) throw new Error("bad station id: " + st);
       defs[st] = {}; bind[st] = {}; values[st] = {};
       for (const [ac, d] of Object.entries(actions)) {
         if (!ID.test(ac)) throw new Error("bad action id: " + ac);
-        const kind = d.kind === "fader" ? "fader" : "button";
+        const kind = d.kind === "fader" ? "fader" : d.kind === "hold" ? "hold" : "button";
         defs[st][ac] = { label: String(d.label || ac), kind, key: d.key || null,
                          min: kind === "fader" ? (d.min ?? 0) : 0, max: kind === "fader" ? (d.max ?? 100) : 0, step: kind === "fader" ? (d.step ?? 1) : 0 };
         values[st][ac] = kind === "fader" ? Math.min(defs[st][ac].max, Math.max(defs[st][ac].min, d.value ?? defs[st][ac].min)) : 0;
@@ -42,7 +44,7 @@
       // defaults must themselves be valid and not collide, or the spec is wrong
       for (const [ac, d] of Object.entries(defs[st])) {
         if (d.key) {
-          const bad = refusal(d.key);
+          const bad = refusal(d.key, st);
           if (bad) throw new Error(`default key ${d.key} for ${st}.${ac} is ${bad}`);
           const clash = Object.keys(bind[st]).find(o => bind[st][o] === d.key);
           if (clash) throw new Error(`default key ${d.key} used twice at ${st}: ${clash} and ${ac}`);
@@ -52,9 +54,10 @@
     }
     let active = null, selected = null, pending = null;
 
-    function refusal(code) {
+    function hasFader(st) { return !!(defs[st] && Object.values(defs[st]).some(d => d.kind === "fader")); }
+    function refusal(code, st) {
       if (typeof code !== "string" || !CODE.test(code)) return "invalid";
-      if (RESERVED.has(code)) return "reserved";
+      if (RESERVED.has(code) || (FADER_KEYS.has(code) && hasFader(st))) return "reserved";
       if (MODIFIER.test(code)) return "modifier";
       return null;
     }
@@ -64,7 +67,7 @@
 
     function assign(st, ac, code, opts) {
       if (!known(st, ac)) return { ok: false, reason: "unknown" };
-      const bad = refusal(code);
+      const bad = refusal(code, st);
       if (bad) return { ok: false, reason: bad };
       const other = owner(st, code);
       if (other && other !== ac) {
@@ -79,8 +82,9 @@
     function clear(st, ac) { if (!known(st, ac)) return false; bind[st][ac] = null; if (selected && selected.st === st && selected.ac === ac) selected = null; changed(); return true; }
     function resetStation(st) { if (!defs[st]) return false; for (const ac of Object.keys(defs[st])) bind[st][ac] = defs[st][ac].key || null; changed(); return true; }
 
-    function open(st) { if (!defs[st]) return false; active = st; selected = null; pending = null; announce(); changed(); return true; }
-    function close() { active = null; selected = null; pending = null; announce(); changed(); }
+    function open(st) { if (!defs[st]) return false; releaseAll(); active = st; selected = null; pending = null; announce(); changed(); return true; }
+    function close() { releaseAll(); active = null; selected = null; pending = null; announce(); changed(); }
+    function releaseAll() { for (const k of [...down.keys()]) { down.delete(k); if (handlers.hold) { const [st, ac] = k.split("."); handlers.hold(st, ac, false); } } }
     function announce() {
       if (typeof document !== "undefined" && document.dispatchEvent && typeof CustomEvent === "function")
         document.dispatchEvent(new CustomEvent("pubcast:station", { detail: { station: active } }));
@@ -89,7 +93,7 @@
     function ask(st, ac) {
       if (!known(st, ac)) return null;
       pending = { st, ac, confirm: null }; changed();
-      return `Where would you like the ${defs[st][ac].label} ${defs[st][ac].kind === "fader" ? "fader" : "button"}?`;
+      return `Where would you like the ${defs[st][ac].label} ${defs[st][ac].kind === "fader" ? "fader" : "button"}?`;      // a held control is still asked about as a button
     }
     function cancelAsk() { const had = !!pending; pending = null; if (had) changed(); return had; }
 
@@ -122,6 +126,11 @@
       const ac = owner(st, code);
       if (!ac) return { handled: false };
       if (defs[st][ac].kind === "fader") { selected = { st, ac }; changed(); return { handled: true, action: ac, selected: true }; }
+      if (defs[st][ac].kind === "hold") {
+        const key = st + "." + ac;
+        if (!down.has(key)) { down.set(key, code); if (handlers.hold) handlers.hold(st, ac, true); changed(); }     // key repeat does not press it again
+        return { handled: true, action: ac, hold: true };
+      }
       if (handlers.button) handlers.button(st, ac);
       return { handled: true, action: ac };
     }
@@ -136,6 +145,15 @@
         const r = press(active, e.code);
         if (r.handled) { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); }
       }, true);
+      // letting go of a held key (even after the station closed or the key was reassigned while held), and losing focus, release them
+      doc.addEventListener("keyup", e => {
+        if (!down.size) return;
+        for (const [k, code] of [...down]) {
+          if (code !== e.code) continue;                                                  // the key that was pressed, even if it has been reassigned since
+          const [st, ac] = k.split("."); down.delete(k); if (handlers.hold) handlers.hold(st, ac, false); changed();
+        }
+      }, true);
+      const win = doc.defaultView; if (win && win.addEventListener) win.addEventListener("blur", () => { releaseAll(); changed(); });
     }
 
     function toJSON() {
@@ -155,7 +173,7 @@
           if (!(ac in mine)) continue;
           const v = mine[ac];
           if (v === null) { next[ac] = null; continue; }
-          if (refusal(v)) { dropped.push(`${st}.${ac}: ${v}`); continue; }
+          if (refusal(v, st)) { dropped.push(`${st}.${ac}: ${v}`); continue; }
           if (taken.has(v)) { dropped.push(`${st}.${ac}: ${v} (doubled)`); continue; }
           taken.add(v); next[ac] = v;
         }
@@ -174,7 +192,8 @@
     const api = {
       assign, clear, resetStation, open, close, ask, cancelAsk, press, attach, setValue, toJSON, load,
       onChange: fn => { listeners.push(fn); },
-      onButton: fn => { handlers.button = fn; }, onFader: fn => { handlers.fader = fn; },
+      onButton: fn => { handlers.button = fn; }, onFader: fn => { handlers.fader = fn; }, onHold: fn => { handlers.hold = fn; },
+      held: st => [...down.keys()].filter(k => k.startsWith(st + ".")).map(k => k.slice(st.length + 1)),
       activeStation: () => active, isOpen: () => active !== null,
       pending: () => pending && { station: pending.st, action: pending.ac, confirming: pending.confirm },
       selected: () => selected && { station: selected.st, action: selected.ac },
@@ -199,10 +218,11 @@
 
   /* Draw the keyboard into `container` for `km`. Assigned keys are lit with the control's name, the selected fader is
      marked, and while a question is pending the keys can be clicked as well as pressed. Returns {render, destroy}. */
-  function overlay(container, km) {
+  function overlay(container, km, opts) {
+    opts = opts || {};
     const doc = container.ownerDocument;
     const wrap = doc.createElement("div"); wrap.className = "pck-overlay";
-    wrap.style.cssText = "position:absolute;inset:auto 0 0 0;margin:auto;max-width:880px;padding:10px;background:rgba(10,12,20,.45);border-radius:14px;pointer-events:none;font:12px system-ui,sans-serif;color:#fff;text-align:center";
+    wrap.style.cssText = (opts.fixed ? "position:fixed;z-index:1000;inset:auto 0 56px 0;" : "position:absolute;inset:auto 0 0 0;") + "margin:auto;max-width:880px;padding:10px;background:rgba(10,12,20,.45);border-radius:14px;pointer-events:none;font:12px system-ui,sans-serif;color:#fff;text-align:center";
     const prompt = doc.createElement("div"); prompt.className = "pck-prompt"; prompt.style.cssText = "min-height:20px;margin-bottom:6px;font-size:14px";
     wrap.appendChild(prompt);
     const keys = new Map();
@@ -222,7 +242,7 @@
 
     function render() {
       const st = km.activeStation(), b = st ? km.bindings(st) : {}, pend = km.pending(), sel = km.selected();
-      wrap.style.display = st ? "block" : "none";
+      wrap.style.display = st && (!opts.show || opts.show()) ? "block" : "none";
       wrap.style.pointerEvents = pend ? "auto" : "none";
       const byCode = {};
       for (const [ac, code] of Object.entries(b)) if (code) byCode[code] = ac;

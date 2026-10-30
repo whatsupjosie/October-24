@@ -47,6 +47,7 @@ class CameraSource:
     position: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     rotation: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     fov: float = 60.0
+    focus: float = 5.0          # metres to the sharp plane; set with update_pose (rotation is [tilt, pan, roll] in degrees, position in metres, y up)
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class CameraPoseEvent:
     rotation: List[float]
     fov: float
     timestamp: float = field(default_factory=time.time)
+    focus: float = 5.0
 
 
 CameraEvent = Union[CameraSwitchEvent, CameraPoseEvent]
@@ -161,7 +163,7 @@ class CameraManager:
         self._emit(CameraSwitchEvent("preview", source_id, previous))
         return True
 
-    def update_pose(self, source_id: str, *, position=None, rotation=None, fov=None) -> bool:
+    def update_pose(self, source_id: str, *, position=None, rotation=None, fov=None, focus=None) -> bool:
         source = self._sources.get(source_id)
         if source is None:
             return False
@@ -184,8 +186,14 @@ class CameraManager:
                 raise ValueError("fov must be between 1 and 179 degrees")
             if new_fov != source.fov:
                 source.fov = new_fov; changed = True
+        if focus is not None:
+            new_focus = float(focus)
+            if not 0.3 <= new_focus <= 200.0:
+                raise ValueError("focus must be between 0.3 and 200 metres")
+            if new_focus != source.focus:
+                source.focus = new_focus; changed = True
         if changed:
-            self._emit(CameraPoseEvent(source_id, list(source.position), list(source.rotation), source.fov))
+            self._emit(CameraPoseEvent(source_id, list(source.position), list(source.rotation), source.fov, focus=source.focus))
         return True
 
     def take(self) -> bool:

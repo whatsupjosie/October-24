@@ -34,7 +34,7 @@ def test_assignments_round_trip_per_person_and_keep_cleared_keys(api):
 
 
 @pytest.mark.parametrize("bad", [
-    {"switcher": {"cut": "Escape"}}, {"switcher": {"cut": "F5"}}, {"switcher": {"cut": "ArrowUp"}}, {"switcher": {"cut": "ShiftLeft"}},
+    {"switcher": {"cut": "Escape"}}, {"switcher": {"cut": "F5"}}, {"switcher": {"cut": "Tab"}}, {"switcher": {"cut": "ShiftLeft"}},
     {"switcher": {"cut": "KeyQ", "fade": "KeyQ"}}, {"switcher": {"cut": "Key Q"}}, {"switcher": {"cut": 5}}, {"Bad": {}}, {"switcher": {"Cut": "KeyQ"}},
     {"switcher": []}, [], "x", {"s": {"a": "../x"}}, {f"s{i}": {} for i in range(40)},
 ])
