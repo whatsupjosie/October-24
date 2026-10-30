@@ -99,3 +99,51 @@ def test_a_broken_file_is_refused_and_the_flat_figure_stays(page):
     page.wait_for_timeout(800)
     assert page.evaluate("window.PubCastGLB.has('pete')") is False
     assert page.problems == []
+
+
+@pytest.mark.parametrize("button,label,expected_clip", [
+    ("glbDemoFemale", "MakeHuman female", "Wave"),
+    ("glbDemoMale", "MakeHuman male", "Wave"),
+    ("glbDemoHusky", "Husky (3 ft)", "Walk"),
+])
+def test_bundled_demo_bodies_load_in_the_real_walker(page, button, label, expected_clip):
+    page.click("#" + button)
+    page.wait_for_function("window.PubCastGLB.has('pete')", timeout=30000)
+    info = page.evaluate("window.PubCastGLB.info('pete')")
+    assert info["label"] == label
+    assert info["skinned"] > 0 and info["bones"] > 0 and info["tris"] > 0
+    assert any(expected_clip.lower() in name.lower() for name in info["clips"])
+    assert info["proceduralWalk"] is (button != "glbDemoHusky")
+    if button == "glbDemoHusky":
+        page.wait_for_function("window.PubCastWalk.S.demoHeights.pete === 36")
+        height = page.evaluate("""() => {
+          const W = window.PubCastWalk, S = W.S, zone = W.zoneAt(S.view, S.pos);
+          const actual = W.avatarPx("pete", S.pos[1], zone, S.pos);
+          const ppi = W.ppiFor(W.sizingOf(S.view), S.pos[1],
+            zone ? W.altitudeAt(zone, S.pos) : null, zone);
+          return {actual, expected: 36 * ppi, override: S.demoHeights.pete};
+        }""")
+        assert height["override"] == 36
+        assert height["actual"] == pytest.approx(height["expected"], abs=0.01)
+    else:
+        assert page.evaluate("window.PubCastWalk.S.demoHeights.pete") is None
+    assert page.problems == []
+
+
+def test_husky_walks_across_green_room_and_enters_writers_room(page):
+    page.goto(page.url.split("?")[0] + "?view=green_room/main")
+    page.wait_for_function("document.documentElement.dataset.ready==='1' && !!window.PubCastGLB")
+    page.click("#glbDemoHusky")
+    page.wait_for_function("window.PubCastGLB.has('pete') && window.PubCastWalk.S.demoHeights.pete === 36", timeout=30000)
+    page.wait_for_function("window.PubCastGLB.info('pete').clips.some(c => /walk/i.test(c))")
+    origin = page.evaluate("window.PubCastWalk.S.pos")
+    sx, sy = page.evaluate("() => window.PubCastWalk.toScreen([343, 252])")
+    page.mouse.click(sx, sy)
+    page.wait_for_selector("#bubble:not([hidden])", timeout=30000)
+    assert page.evaluate("window.PubCastWalk.S.pos") != origin
+    page.click('#bubble button:has-text("Writers\' Room")')
+    page.wait_for_function("window.PubCastWalk.S.key === 'writers_room/main'", timeout=15000)
+    assert page.evaluate("window.PubCastGLB.has('pete')")
+    assert page.evaluate("window.PubCastWalk.S.demoHeights.pete") == 36
+    assert page.evaluate("window.PubCastWalk.floorContains(window.PubCastWalk.S.view, window.PubCastWalk.S.pos)")
+    assert page.problems == []

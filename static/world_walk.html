@@ -162,6 +162,9 @@ textarea { width: 100%; height: 90px; background: var(--bg); color: var(--ink); 
     <div class="small dim">Load any rigged GLB for the character selected above. It is sized to the exact height this picture gives that character at that spot, and it turns, walks and idles as you click around. If a file has no animations it sways instead.</div>
     <div class="btnrow">
       <button id="glbMannequin">Try the test mannequin</button>
+      <button id="glbDemoFemale">MakeHuman female</button>
+      <button id="glbDemoMale">MakeHuman male</button>
+      <button id="glbDemoHusky">Husky (3 ft)</button>
       <button id="glbPick">Load a GLB&hellip;</button>
       <button id="glbClear">Back to flat figure</button>
     </div>
@@ -364,6 +367,7 @@ const S = {
   cans: {}, canArm: null, canSel: -1, canDrag: null,
   vel: [0, 1], moving: false, path: [],
   avatarIds: {},            // character -> avatar id in the library, so the choice is kept with your progress
+  demoHeights: {},           // temporary demo-only height override; never saved as character height or library identity
   library: [],
 };
 const CAN_IN = 4.83, CAN_W_IN = 2.6;     // a 12 oz can: height and diameter in inches
@@ -390,7 +394,7 @@ function sizingOf(view, key, noMult) {
   }
   return { camera, scale };
 }
-function heightIn(charId) { return S.world.character_height_in[charId]; }
+function heightIn(charId) { return S.demoHeights[charId] || S.world.character_height_in[charId]; }
 function avatarPx(charId, y, zone, p) {
   const alt = zone ? altitudeAt(zone, p) : null;
   const ppi = ppiFor(sizingOf(S.view), y, alt, zone);
@@ -1257,19 +1261,41 @@ async function loadGlb(url, label) {
     return true;
   } catch (e) { G.state.lastError = String(e && e.message || e); setGlbInfo(); toast("That file would not load: " + G.state.lastError); return false; }
 }
-$("glbMannequin").addEventListener("click", () => { delete S.avatarIds[S.char]; loadGlb("/static/world/test_avatars/Xbot.glb", "test mannequin").then(syncLibrarySelect); });
+/* Bundled CC0 demo bodies are ephemeral: switching to one never rewrites a saved avatar or character height.
+   The Husky is a quadruped with its own animations, scaled to 36 inches rather than a human's height. */
+const GLB_DEMOS = {
+  glbMannequin: { url: "/static/world/test_avatars/Xbot.glb", label: "test mannequin" },
+  glbDemoFemale: { url: "/static/world/test_avatars/MakeHuman_Female.glb", label: "MakeHuman female" },
+  glbDemoMale: { url: "/static/world/test_avatars/MakeHuman_Male.glb", label: "MakeHuman male" },
+  glbDemoHusky: { url: "/static/world/test_avatars/Husky.glb", label: "Husky (3 ft)", height: 36 },
+};
+for (const [id, demo] of Object.entries(GLB_DEMOS)) {
+  $(id).addEventListener("click", async () => {
+    const character = S.char;
+    if (await loadGlb(demo.url, demo.label)) {
+      delete S.avatarIds[character];
+      if (demo.height) S.demoHeights[character] = demo.height;
+      else delete S.demoHeights[character];
+      syncLibrarySelect();
+    }
+  });
+}
 $("glbPick").addEventListener("click", () => $("glbFile").click());
 $("glbFile").addEventListener("change", e => {
   const f = e.target.files && e.target.files[0]; if (!f) return;
-  delete S.avatarIds[S.char];
-  const url = URL.createObjectURL(f); loadGlb(url, f.name).then(syncLibrarySelect).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); e.target.value = "";
+  const character = S.char;
+  const url = URL.createObjectURL(f); loadGlb(url, f.name).then(ok => {
+    if (ok) { delete S.avatarIds[character]; delete S.demoHeights[character]; syncLibrarySelect(); }
+  }).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); e.target.value = "";
 });
-$("glbClear").addEventListener("click", () => { const G = window.PubCastGLB; if (G) G.clear(S.char); delete S.avatarIds[S.char]; syncLibrarySelect(); setGlbInfo(); });
+$("glbClear").addEventListener("click", () => { const G = window.PubCastGLB; if (G) G.clear(S.char); delete S.avatarIds[S.char]; delete S.demoHeights[S.char]; syncLibrarySelect(); setGlbInfo(); });
 $("glbHolo").addEventListener("change", e => { const G = window.PubCastGLB; if (G) G.setHologram(e.target.checked); });
 canvas.addEventListener("dragover", e => e.preventDefault());
 canvas.addEventListener("drop", e => {
   e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-  if (f && /\.glb$/i.test(f.name)) { const url = URL.createObjectURL(f); loadGlb(url, f.name).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); }
+  if (f && /\.glb$/i.test(f.name)) { const character = S.char, url = URL.createObjectURL(f); loadGlb(url, f.name).then(ok => {
+    if (ok) { delete S.avatarIds[character]; delete S.demoHeights[character]; syncLibrarySelect(); }
+  }).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); }
 });
 
 /* ------------------------------ the host acting on you (possession, timeout) ---------- */
@@ -1556,8 +1582,8 @@ async function refreshLibrary() {
 }
 $("glbLibrary").addEventListener("change", async e => {
   const a = libraryEntry(e.target.value);
-  if (!a) { const G = window.PubCastGLB; if (G) G.clear(S.char); delete S.avatarIds[S.char]; setGlbInfo(); return; }
-  if (await loadGlb(a.url, a.name)) S.avatarIds[S.char] = a.id;
+  if (!a) { const G = window.PubCastGLB; if (G) G.clear(S.char); delete S.avatarIds[S.char]; delete S.demoHeights[S.char]; setGlbInfo(); return; }
+  if (await loadGlb(a.url, a.name)) { S.avatarIds[S.char] = a.id; delete S.demoHeights[S.char]; }
   syncLibrarySelect();
 });
 /* wait for the 3D part (a module that loads on its own) before putting saved avatars on */
@@ -1623,11 +1649,22 @@ window.PubCastWalk = {
     const first = byLive ? [byLive.id, null] : k && k.includes("/") ? k.split("/") : resume ? [resume.room, resume.view || null] : [home.id, null];
     await setView(first[0], first[1], { instant: true });
     if (resume && Array.isArray(resume.pos) && S.view.id === (resume.view || S.view.id) && S.view.zones.length && walkable(S.view, resume.pos)) S.pos = resume.pos.slice();
+    // ?demo=husky is a direct launch of the real bundled GLB on the real room artwork.
+    // A demo must not replace a saved avatar or character identity in persistent progress.
+    const directHusky = q.get("demo") === "husky";
+    if (directHusky) delete S.avatarIds[S.char];
     refreshLibrary().then(() => { if (Object.keys(S.avatarIds).length) wearSavedAvatars(); });
     if (saved && typeof saved.hologram === "boolean") { $("glbHolo").checked = saved.hologram; glbReady().then(G => G.setHologram(saved.hologram)); }
     if (q.get("pads") === "0") { S.show.pads = false; $("shPads").checked = false; }
     if (q.get("refs") === "1") { S.show.refs = true; $("shRefs").checked = true; }
     if (q.get("occ") === "1") { S.show.occ = true; $("shOcc").checked = true; }
+    if (directHusky) {
+      await glbReady();
+      if (!await loadGlb(GLB_DEMOS.glbDemoHusky.url, GLB_DEMOS.glbDemoHusky.label))
+        throw new Error("Bundled Husky GLB failed to load: " + (window.PubCastGLB.state.lastError || "unknown error"));
+      S.demoHeights[S.char] = 36;
+      syncLibrarySelect();
+    }
     document.documentElement.dataset.ready = "1";
     if (L) L.setPresence(presenceNow);
     HostPanel.init().catch(() => { /* no host panel for this session */ });

@@ -33,7 +33,7 @@ It must be served from the repo root, because the page loads `/static/...` paths
 - **Click anywhere:** it walks there, routing round tables and chairs. If there is no route, it creeps round awkwardly and stops after 3 seconds of getting nowhere.
 - **Arrow keys or WASD:** walk while held. Up goes away from you and down comes towards you. Shift walks faster.
 - **Walk as:** choose Pete (68 in), RePete (70 in) or Purfluous (74 in).
-- **3D avatar:** "Load a GLB..." (or drag a .glb onto the picture) sizes any rigged GLB to the right height at every spot and plays its walk and idle clips. "Try the test mannequin" loads a free three.js model. "Hologram look" gives it a cyan glow.
+- **3D avatar:** "Load a GLB..." (or drag a .glb onto the picture) sizes any rigged GLB to the chosen character height at every spot and plays its available walk/idle clips. The built-in demo buttons offer Xbot (Walk/Idle), MakeHuman female and male (Wave clips only; a procedural biped gait animates their Mixamo-standard legs while walking), and a Quaternius Husky (native quadruped Walk animation). The Husky is drawn **36 inches tall** rather than sized as a human. These bundled CC0 demos are session-only selections; they do not replace library avatars or persist their height overrides. The normal library picker and manual GLB import remain unchanged. "Hologram look" gives it a cyan glow.
 - **Reference cans:** drop a 12 oz Coke can (4.83 in) on the picture and size it until it looks right. Tick "Size the avatars from my cans" and the avatars follow it.
 - **Size tuner:** one slider makes everything bigger or smaller, and there are per-picture camera sliders. "Copy my changes" gives the numbers as JSON. Changes are kept in that browser only.
 

@@ -76,6 +76,15 @@ function hologramMaterial() {
 }
 
 function findClip(clips, re) { return clips.find(c => re.test(c.name)) || null; }
+/* MakeHuman's bundled test bodies have a Wave clip but no Walk/Idle. Apply a lightweight
+   alternating biped gait to their Mixamo-standard bones instead of freezing or playing Wave
+   while the avatar moves. Other rigs keep the established bob/sway fallback. */
+function makeBipedGait(root) {
+  const names = ["LeftUpLeg", "RightUpLeg", "LeftArm", "RightArm"];
+  const bones = names.map(n => root.getObjectByName("mixamorig:" + n));
+  if (!bones[0] || !bones[1]) return null;
+  return bones.map(b => b ? { bone: b, x: b.rotation.x } : null);
+}
 
 function normalise(root) {
   root.updateMatrixWorld(true);
@@ -109,6 +118,7 @@ async function load(character, url, label) {
   const norm = normalise(root);
   const mixer = skinned && gltf.animations.length ? new THREE.AnimationMixer(norm.wrap) : null;
   const walk = findClip(gltf.animations, /walk/i), idle = findClip(gltf.animations, /idle|stand|breath/i);
+  const gait = !walk && !idle ? makeBipedGait(root) : null;
   const actions = {};
   if (mixer) {
     if (walk) { actions.walk = mixer.clipAction(walk); actions.walk.play(); actions.walk.setEffectiveWeight(0); }
@@ -116,7 +126,7 @@ async function load(character, url, label) {
   }
   const normalMaterials = new Map(), holo = hologramMaterial();
   root.traverse(o => { if (o.isMesh) normalMaterials.set(o, o.material); });
-  const inst = { character, label: label || character, group: norm.wrap, mixer, actions, yaw: 0, wWalk: 0, phase: 0,
+  const inst = { character, label: label || character, group: norm.wrap, mixer, actions, gait, yaw: 0, wWalk: 0, phase: 0,
                  clips: gltf.animations.map(a => a.name), nativeHeight: norm.nativeHeight, meshCount, skinned, normalMaterials, holo,
                  tris, bones: boneSet.size };
   const old = avatars.get(character); if (old) dispose(old);
@@ -151,7 +161,15 @@ function draw(ctx, character, cx, fy, H, motion) {
   inst.group.rotation.y = inst.yaw;
   // walk / idle cross-fade, or a small bob and lean when the file has no clips
   inst.wWalk += ((moving ? 1 : 0) - inst.wWalk) * Math.min(1, BLEND_RATE * dt);
-  if (inst.mixer) {
+  if (inst.gait) {
+    inst.phase += dt * (moving ? 8 : 1.4);
+    const swing = Math.sin(inst.phase) * 0.33 * inst.wWalk;
+    // Thighs swing in opposition; arms counter-swing at a smaller amplitude.
+    const amounts = [swing, -swing, -swing * 0.65, swing * 0.65];
+    inst.gait.forEach((g, i) => { if (g) g.bone.rotation.x = g.x + amounts[i]; });
+    inst.group.position.y = Math.abs(Math.sin(inst.phase)) * 0.012 * inst.wWalk;
+    inst.group.rotation.z = 0;
+  } else if (inst.mixer && (inst.actions.walk || inst.actions.idle)) {
     if (inst.actions.walk) inst.actions.walk.setEffectiveWeight(inst.actions.idle ? inst.wWalk : 1);
     if (inst.actions.idle) inst.actions.idle.setEffectiveWeight(inst.actions.walk ? 1 - inst.wWalk : 1);
     if (inst.actions.walk && !inst.actions.idle) inst.actions.walk.paused = !moving;
@@ -180,7 +198,7 @@ function draw(ctx, character, cx, fy, H, motion) {
 function setHologram(on) { state.hologram = !!on; }
 function info(character) {
   const i = avatars.get(character); if (!i) return null;
-  return { label: i.label, clips: i.clips, nativeHeight: i.nativeHeight, meshes: i.meshCount, skinned: i.skinned, tris: i.tris, bones: i.bones };
+  return { label: i.label, clips: i.clips, nativeHeight: i.nativeHeight, meshes: i.meshCount, skinned: i.skinned, tris: i.tris, bones: i.bones, proceduralWalk: !!i.gait };
 }
 
 window.PubCastGLB = { load, clear, has, draw, setHologram, info, state };
