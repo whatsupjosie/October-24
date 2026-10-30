@@ -58,7 +58,9 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 <p id="description" class="muted"></p>
 <div class="row"><button id="start">START PRODUCTION</button><button id="stop" disabled>END PRODUCTION</button></div>
 <div class="row"><button id="record" disabled>START RECORDING</button><button id="recordStop" disabled>STOP RECORDING</button></div>
-<label><input type="checkbox" id="mic"> Capture microphone (requires permission and a secure origin)</label>
+<label><input type="checkbox" id="mic"> Capture microphone (permission required; recording refuses if microphone cannot be acquired)</label>
+<div class="row"><label class="field">MIC LEVEL <input type="range" id="micLevel" min="0" max="100" value="100" disabled></label>
+<button id="micMute" disabled>MUTE MIC</button><label class="field">REAL MIC METER <meter id="micMeter" min="0" max="1" value="0"></meter></label></div>
 <p id="alert" role="alert"></p>
 </section>
 <section style="margin-top:12px"><h2>VISION MIXER</h2>
@@ -67,13 +69,15 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 </section>
 <section style="margin-top:12px"><h2>PERFORMERS & CUES</h2>
 <div class="field"><label for="performer">Selected performer</label><select id="performer"></select></div>
-<div class="row"><button id="moveLeft">← MOVE</button><button id="moveRight">MOVE →</button><button id="gesture">GESTURE</button><button id="reset">RESET BLOCKING</button></div>
+<div class="row"><button id="moveLeft">← MOVE</button><button id="moveRight">MOVE →</button><button id="gesture">PLAY REAL GESTURE</button><button id="reset">RESET BLOCKING</button></div>
+<div class="row"><button id="scoreLeft">SCORE +1 PLAYER 1</button><button id="scoreRight">SCORE +1 PLAYER 2</button></div>
 <div class="row"><button id="lower">TOGGLE LOWER THIRD</button><button id="black">BLACK / RETURN</button></div>
 <small>Moving changes stage coordinates. A loaded GLB uses actual rig animation; if a model is unavailable the output reports that failure instead of pretending a substitute is 3D.</small>
 <p id="avatarStatus" class="muted">Checking avatar renderer…</p>
 </section>
 <section style="margin-top:12px"><h2>REPLACEABLE SET ASSETS</h2>
 <div class="field"><label for="backFile">Background layer image</label><input type="file" id="backFile" accept="image/*"></div>
+<div class="field"><label for="midFile">Mid-ground layer image</label><input type="file" id="midFile" accept="image/*"></div>
 <div class="field"><label for="frontFile">Foreground transparent image</label><input type="file" id="frontFile" accept="image/*"></div>
 <div class="row"><button id="clearAssets">RESTORE PLACEHOLDERS</button></div>
 <p id="assetInfo" class="muted">Default sets are generated procedurally. Optional images are loaded locally into separate layers.</p>
@@ -82,6 +86,8 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 </aside>
 </main>
 <script src="./production25d_core.js"></script>
+<script src="./production25d_renderer.js"></script>
+<script src="./production25d_storage.js"></script>
 <script type="importmap">{"imports":{"three":"./vendor/three-0.160.0/build/three.module.js","three/addons/":"./vendor/three-0.160.0/examples/jsm/"}}</script>
 <script type="module" src="./world_walk_glb.js"></script>
 <script src="./production25d_app.js"></script>
