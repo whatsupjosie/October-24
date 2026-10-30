@@ -113,6 +113,7 @@ def test_bundled_demo_bodies_load_in_the_real_walker(page, button, label, expect
     assert info["label"] == label
     assert info["skinned"] > 0 and info["bones"] > 0 and info["tris"] > 0
     assert any(expected_clip.lower() in name.lower() for name in info["clips"])
+    assert info["proceduralWalk"] is (button != "glbDemoHusky")
     if button == "glbDemoHusky":
         page.wait_for_function("window.PubCastWalk.S.demoHeights.pete === 36")
         height = page.evaluate("""() => {
