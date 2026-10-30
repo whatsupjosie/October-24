@@ -127,7 +127,7 @@ async function load(character, url, label) {
   const normalMaterials = new Map(), holo = hologramMaterial();
   root.traverse(o => { if (o.isMesh) normalMaterials.set(o, o.material); });
   const inst = { character, label: label || character, group: norm.wrap, mixer, actions, gait, yaw: 0, wWalk: 0, phase: 0,
-                 clips: gltf.animations.map(a => a.name), nativeHeight: norm.nativeHeight, meshCount, skinned, normalMaterials, holo,
+                 clipAssets: gltf.animations, activeGesture: null, clips: gltf.animations.map(a => a.name), nativeHeight: norm.nativeHeight, meshCount, skinned, normalMaterials, holo,
                  tris, bones: boneSet.size };
   const old = avatars.get(character); if (old) dispose(old);
   avatars.set(character, inst);
@@ -170,8 +170,16 @@ function draw(ctx, character, cx, fy, H, motion) {
     inst.group.position.y = Math.abs(Math.sin(inst.phase)) * 0.012 * inst.wWalk;
     inst.group.rotation.z = 0;
   } else if (inst.mixer && (inst.actions.walk || inst.actions.idle)) {
-    if (inst.actions.walk) inst.actions.walk.setEffectiveWeight(inst.actions.idle ? inst.wWalk : 1);
-    if (inst.actions.idle) inst.actions.idle.setEffectiveWeight(inst.actions.walk ? 1 - inst.wWalk : 1);
+    const gesturing = !!inst.activeGesture;
+    if (inst.actions.walk) inst.actions.walk.setEffectiveWeight(gesturing ? 0 : (inst.actions.idle ? inst.wWalk : 1));
+    if (inst.actions.idle) inst.actions.idle.setEffectiveWeight(gesturing ? 0 : (inst.actions.walk ? 1 - inst.wWalk : 1));
+    if (gesturing) {
+      inst.activeGesture.elapsed += dt;
+      if (inst.activeGesture.elapsed >= inst.activeGesture.duration) {
+        inst.activeGesture.action.stop();
+        inst.activeGesture = null;
+      }
+    }
     if (inst.actions.walk && !inst.actions.idle) inst.actions.walk.paused = !moving;
     inst.mixer.update(dt);
     inst.group.position.y = 0;
@@ -195,11 +203,27 @@ function draw(ctx, character, cx, fy, H, motion) {
   return true;
 }
 
+/* Optional exact rig clip, used by studio cues. No invented gesture: report false if absent.
+   Compatible with the walker: nothing changes until this method is explicitly called. */
+function playClip(character, pattern) {
+  const inst = avatars.get(character);
+  if (!inst || !inst.mixer || typeof pattern !== "string" || pattern.length > 80) return false;
+  let re;
+  try { re = new RegExp(pattern, "i"); } catch (_) { return false; }
+  const clip = inst.clipAssets.find(c => re.test(c.name) && !/^(walk|idle|stand)/i.test(c.name));
+  if (!clip) return false;
+  if (inst.activeGesture) inst.activeGesture.action.stop();
+  const action = inst.mixer.clipAction(clip);
+  action.reset(); action.setLoop(THREE.LoopOnce, 1); action.clampWhenFinished = true;
+  action.setEffectiveWeight(1); action.play();
+  inst.activeGesture = {action, elapsed: 0, duration: Math.max(.05, clip.duration)};
+  return true;
+}
 function setHologram(on) { state.hologram = !!on; }
 function info(character) {
   const i = avatars.get(character); if (!i) return null;
   return { label: i.label, clips: i.clips, nativeHeight: i.nativeHeight, meshes: i.meshCount, skinned: i.skinned, tris: i.tris, bones: i.bones, proceduralWalk: !!i.gait };
 }
 
-window.PubCastGLB = { load, clear, has, draw, setHologram, info, state };
+window.PubCastGLB = { load, clear, has, draw, playClip, setHologram, info, state };
 document.dispatchEvent(new Event("pubcast-glb-ready"));
