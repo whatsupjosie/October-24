@@ -114,6 +114,7 @@ def test_bundled_demo_bodies_load_in_the_real_walker(page, button, label, expect
     assert info["skinned"] > 0 and info["bones"] > 0 and info["tris"] > 0
     assert any(expected_clip.lower() in name.lower() for name in info["clips"])
     if button == "glbDemoHusky":
+        page.wait_for_function("window.PubCastWalk.S.demoHeights.pete === 36")
         height = page.evaluate("""() => {
           const W = window.PubCastWalk, S = W.S, zone = W.zoneAt(S.view, S.pos);
           const actual = W.avatarPx("pete", S.pos[1], zone, S.pos);
@@ -132,7 +133,7 @@ def test_husky_walks_across_green_room_and_enters_writers_room(page):
     page.goto(page.url.split("?")[0] + "?view=green_room/main")
     page.wait_for_function("document.documentElement.dataset.ready==='1' && !!window.PubCastGLB")
     page.click("#glbDemoHusky")
-    page.wait_for_function("window.PubCastGLB.has('pete')", timeout=30000)
+    page.wait_for_function("window.PubCastGLB.has('pete') && window.PubCastWalk.S.demoHeights.pete === 36", timeout=30000)
     page.wait_for_function("window.PubCastGLB.info('pete').clips.some(c => /walk/i.test(c))")
     origin = page.evaluate("window.PubCastWalk.S.pos")
     sx, sy = page.evaluate("() => window.PubCastWalk.toScreen([343, 252])")
