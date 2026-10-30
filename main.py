@@ -64,6 +64,8 @@ from modules.production_routes import create_production_router
 from modules.program_audio import ProgramAudioState, apply_audio_event
 from modules.governance import GovernanceEngine
 from modules.governance_routes import create_governance_router
+from modules.host_control import create_host_control_router
+from modules.pubworld_private import PubWorldPrivate
 from modules.avatar_studio_bridge import AvatarStudioBridge, create_avatar_studio_router
 from modules.pubworld_hotspots import create_hotspot_router
 from modules.avatar import load_avatar, save_avatar, list_presets as list_avatar_presets
@@ -1207,6 +1209,7 @@ async def lifespan(application: FastAPI):
     # 7. Governance
     governance = GovernanceEngine(DATA_DIR)
     application.include_router(create_governance_router(governance, hub, authority_bridge=alex_bridge, authority_store=pub_manager_authority))
+    application.include_router(create_host_control_router(governance, hub, DATA_DIR, senders=[pubworld_private.send]))   # possession, timeout, profile, gifts, tracker log
     logger.info("[7/12] Governance ready — bans, freeze, consent, waiting room")
 
     # 7b. PubWorld Hotspot API
@@ -1974,6 +1977,8 @@ app.include_router(_avatar_imports)
 # Bella Faux Pas Studio progress (room, spot, who you walk as, your avatars, size tuning), per owner on this host.
 from modules.studio_progress import create_studio_progress_router  # noqa: E402
 app.include_router(create_studio_progress_router(DATA_DIR))
+from modules.keymap_store import create_keymap_router  # noqa: E402
+app.include_router(create_keymap_router(DATA_DIR))          # per-person key assignments (static/keymap.js)
 from modules.counter_layout import create_counter_layout_router  # noqa: E402
 app.include_router(create_counter_layout_router(DATA_DIR))
 # New PubPartner cartridges (pubpartner/cartridge.py init_cartridge), each registered as a friend; never the Alex vessel.
@@ -4413,6 +4418,7 @@ async def set_preview_camera(source_id: str, identity: Dict[str, Any] = Depends(
 # and sends room_change, ping, and hotspot action messages.
 
 _pubworld_clients: dict[str, WebSocket] = {}
+pubworld_private = PubWorldPrivate()      # walker sockets whose owner is verified, for private host notices
 
 @app.websocket("/pubworld/ws/{client_id}")
 async def pubworld_ws(ws: WebSocket, client_id: str):
@@ -4458,6 +4464,8 @@ async def pubworld_ws(ws: WebSocket, client_id: str):
         await ws.close(code=1008, reason="PubWorld client identifier already in use")
         return
     _pubworld_clients[client_id] = ws
+    if auth_enforced():                                   # the handshake above proved who this is
+        pubworld_private.register(actor_id, ws)
 
     welcome_payload: dict = {"type": "welcome", "payload": {}}
     if hub:
@@ -4477,6 +4485,12 @@ async def pubworld_ws(ws: WebSocket, client_id: str):
             msg_type = data.get("type", "")
 
             if msg_type == "auth":
+                # a valid token in-band proves who this socket is, with or without enforced auth; a bad one proves nothing
+                proof = auth_module.decode_access_token(str(data.get("token") or "")) if data.get("token") else None
+                proven = str((proof or {}).get("sub") or "").strip()
+                if proven:
+                    actor_id = proven
+                    pubworld_private.register(actor_id, ws)
                 await ws.send_text(json.dumps({"type": "auth_ok", "user_id": actor_id}))
             elif msg_type == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
@@ -4504,6 +4518,7 @@ async def pubworld_ws(ws: WebSocket, client_id: str):
     except Exception as exc:
         logger.warning("PubWorld WS error for client %s: %s", client_id, exc)
     finally:
+        pubworld_private.unregister(ws)
         if _pubworld_clients.get(client_id) is ws:
             _pubworld_clients.pop(client_id, None)
 

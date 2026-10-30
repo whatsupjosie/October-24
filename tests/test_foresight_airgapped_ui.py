@@ -22,6 +22,23 @@ APP_SCRIPT = next(script for script in reversed(SCRIPTS) if "async function boot
 DOM = re.sub(r"<script(?:\s+[^>]*)?>.*?</script>", "", COUNTER_HTML, flags=re.S)
 
 
+def serve_counter(page):
+    """Open the Counter page on a real http origin. page.set_content() gives it an opaque origin, where sessionStorage is
+    refused and a relative fetch cannot be parsed, so the Counter's boot (which asks /api/writers-room/config who owns the
+    workspace) stopped before it started the frame loop: no frames, so no tray ever opened. Only the owner lookup is
+    answered; every other call gets a 404, as it would with no host behind the page."""
+    def handle(route):
+        url = route.request.url
+        if url.endswith("/api/writers-room/config"):
+            route.fulfill(status=200, content_type="application/json", body='{"user_id":"airgapped-test"}')
+        elif url == "http://counter.test/":
+            route.fulfill(status=200, content_type="text/html", body=DOM)
+        else:
+            route.fulfill(status=404, body="")
+    page.route("http://counter.test/**", handle)
+    page.goto("http://counter.test/")
+
+
 @pytest.fixture
 def counter_page():
     with playwright.sync_playwright() as p:
@@ -38,7 +55,7 @@ def counter_page():
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.set_content(DOM)
+        serve_counter(page)
         page.evaluate("""() => {
           const storage = new Map();
           Object.defineProperty(window, 'localStorage', {configurable:true, value: {
@@ -102,7 +119,8 @@ def test_real_counter_integrates_2i_hosting_and_restorable_layout(counter_page):
     # The actual program provider creates the iframe and retains content identity.
     page.evaluate("__programs.open('twoi')")
     page.wait_for_function("__counter.trays.some(t=>t.stack[0].type==='twoi') && !__counter.trays[0].hidden", timeout=5000)
-    assert page.locator('iframe[src="/writers-room"]').count() == 1
+    # the Counter adds a per-session nonce to the tray's address (?foresightSession=...), so match the path, not the whole address (it is also absolute once the page has an origin)
+    assert page.locator('iframe[src*="/writers-room"]').count() == 1
     page.evaluate("__counter.saveNow()")
     saved = page.evaluate("__counter.serialize()")
     assert len(saved["trays"]) == 1
@@ -140,7 +158,7 @@ def compatibility_page():
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
-        page.set_content(DOM)
+        serve_counter(page)
         page.evaluate("""() => {
           const storage=new Map();
           Object.defineProperty(window,'localStorage',{configurable:true,value:{

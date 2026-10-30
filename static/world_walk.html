@@ -39,6 +39,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 #bubble .choices { display: flex; flex-direction: column; gap: 6px; }
 #bubble .choices button { text-align: left; }
 #bubble[hidden] { display: none; }
+#hostBanner { position: absolute; z-index: 9; left: 50%; top: 12px; transform: translateX(-50%); max-width: min(560px, 92%); padding: 12px 16px; border-radius: 14px; background: var(--panel); color: var(--ink); border: 2px solid var(--accent); box-shadow: 0 10px 32px rgba(0,0,0,.55); text-align: center; }
+#hostBanner[hidden] { display: none; }
+#hostBanner .hb-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+#hostBanner .hb-text { white-space: pre-line; font-size: 14px; }
+#hostBanner .hb-time { margin-top: 6px; color: var(--dim); font-size: 12px; }
 #toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: rgba(10,10,16,.85); color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 90%; text-align: center; }
 #toast.on { opacity: 1; }
 #fade { position: absolute; inset: 0; background: #000; opacity: 0; transition: opacity .22s; pointer-events: none; }
@@ -84,6 +89,7 @@ textarea { width: 100%; height: 90px; background: var(--bg); color: var(--ink); 
     </div>
     <div id="bubble" hidden role="dialog" aria-live="polite"></div>
     <div id="toast" role="status"></div>
+    <div id="hostBanner" hidden role="alert" aria-live="assertive"><div class="hb-title"></div><div class="hb-text"></div><div class="hb-time"></div></div>
     <div id="fade"></div>
   </div>
   <aside id="panel">
@@ -150,6 +156,7 @@ textarea { width: 100%; height: 90px; background: var(--bg); color: var(--ink); 
 <script type="importmap">{"imports":{"three":"/static/vendor/three-0.160.0/build/three.module.js","three/addons/":"/static/vendor/three-0.160.0/examples/jsm/"}}</script>
 <script type="module" src="/static/world_walk_glb.js"></script>
 <script src="/static/world_walk_live.js"></script>
+<script src="/static/keymap.js"></script>
 <script>
 "use strict";
 /* ===========================================================================
@@ -846,7 +853,13 @@ function nearestWalkable(v, p, maxR) {
   }
   return p;
 }
-function setTarget(pt) {
+/* Sitting at a station (the video switcher, the audio mixer ...) you do not walk: its keys are the station's, not the walker's. */
+const atStation = () => !!(window.PubCastKeymap && window.PubCastKeymap.isOpen && window.PubCastKeymap.isOpen());
+/* The host can also take the avatar (possession) or put this person in the disciplinary waiting room (timeout): then their own keys and clicks do not walk either. */
+S.host = { possessed: false, until: 0, timeout: null };
+const inputLocked = () => atStation() || S.host.possessed || !!S.host.timeout;
+function setTarget(pt, byHost) {
+  if (pt && !byHost && inputLocked()) return;
   S.stall = null;
   if (pt && S.view.zones.length) pt = nearestWalkable(S.view, pt);
   S.target = pt; S.path = [];
@@ -1040,7 +1053,9 @@ canvas.addEventListener("pointerdown", e => {
 canvas.addEventListener("pointerup", () => { if (S.canDrag) { S.canDrag = null; buildCans(); } });
 const MOVE_KEYS = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", "W", "A", "S", "D"]);
 const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test((e.target && e.target.tagName) || "") && !(e.target.type === "checkbox" || e.target.type === "radio");
+document.addEventListener("pubcast:station", e => { if (e.detail && e.detail.station) { HELD.clear(); S.target = null; S.path = []; } });   // sat down: stop where you are
 window.addEventListener("keydown", e => {
+  if (inputLocked()) return;
   if (MOVE_KEYS.has(e.key) && !typing(e) && !e.ctrlKey && !e.metaKey && !e.altKey) { HELD.add(e.key.length === 1 ? e.key.toLowerCase() : e.key); e.preventDefault(); }
   else if (e.key === "Shift") HELD.add("Shift");
 });
@@ -1196,6 +1211,39 @@ canvas.addEventListener("dragover", e => e.preventDefault());
 canvas.addEventListener("drop", e => {
   e.preventDefault(); const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (f && /\.glb$/i.test(f.name)) { const url = URL.createObjectURL(f); loadGlb(url, f.name).finally(() => setTimeout(() => URL.revokeObjectURL(url), 5000)); }
+});
+
+/* ------------------------------ the host acting on you (possession, timeout) ---------- */
+/* Text from the host is shown exactly as sent, as plain text, never as markup. */
+const hostBanner = $("hostBanner");
+function showHostBanner(title, text, until) {
+  hostBanner.querySelector(".hb-title").textContent = title;
+  hostBanner.querySelector(".hb-text").textContent = text || "";
+  hostBanner.hidden = false; tickHostBanner(until);
+}
+function hideHostBanner() { hostBanner.hidden = true; }
+function tickHostBanner(until) {
+  hostBanner.dataset.until = until || 0;
+  const left = Math.max(0, Math.round(((until || 0) - Date.now()) / 1000));
+  hostBanner.querySelector(".hb-time").textContent = until ? "Time left " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0") : "";
+}
+setInterval(() => { if (!hostBanner.hidden) tickHostBanner(+hostBanner.dataset.until || 0); }, 1000);
+function stopWhereYouStand() { HELD.clear(); S.target = null; S.path = []; }
+window.addEventListener("pubcast:host", e => {
+  const m = e.detail || {}, h = S.host;
+  if (m.type === "host_notice") {
+    h.possessed = true; stopWhereYouStand();
+    showHostBanner("The host has taken control of your avatar", String(m.text || ""), Number.isFinite(m.until) ? m.until * 1000 : 0);
+  } else if (m.type === "host_drive") {
+    if (h.possessed && Array.isArray(m.pos) && S.view.zones.length && m.pos.length === 2 && m.pos.every(Number.isFinite)) setTarget(snapToFloor(S.view, m.pos.slice()), true);
+  } else if (m.type === "host_release") {
+    h.possessed = false; if (!h.timeout) hideHostBanner(); toast("Your avatar is yours again");
+  } else if (m.type === "host_teleport") {
+    h.timeout = { room: String(m.room || ""), until: Number.isFinite(m.until) ? m.until * 1000 : 0 }; stopWhereYouStand();
+    showHostBanner("Waiting room", String(m.text || ""), h.timeout.until);
+  } else if (m.type === "host_timeout_end") {
+    h.timeout = null; if (!h.possessed) hideHostBanner(); toast("Your timeout is over");
+  }
 });
 
 /* ------------------------------ your progress (kept on the host) ---------- */

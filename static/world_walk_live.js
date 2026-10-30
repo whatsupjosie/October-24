@@ -102,6 +102,11 @@
         if (msg.payload && msg.payload.production_state) applyProduction(msg.payload.production_state);
         break;
       case "production_state": if (msg.payload) applyProduction(msg.payload); break;
+      // The host acting on this person (modules/host_control.py): a notice and control of the avatar (possession), where to
+      // walk while it is in control, the disciplinary waiting room (timeout), and the end of each. The walker listens for
+      // "pubcast:host" and decides what to show; this file only passes them on.
+      case "host_notice": case "host_drive": case "host_release": case "host_teleport": case "host_timeout_end":
+        global.dispatchEvent(new CustomEvent("pubcast:host", { detail: msg })); break;
       default: break;                                         // pong, room_ack, hotspot_result: nothing to do
     }
   }
