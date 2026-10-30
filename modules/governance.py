@@ -324,6 +324,10 @@ class GovernanceEngine:
         self._audit("UNBAN", lifted_by, user_id, f"ban_id={ban.ban_id}")
         return True
 
+    def active_bans(self) -> List[BanRecord]:
+        """Every ban in force right now (a session ban is in force until the app restarts or it is lifted)."""
+        return [b for b in self._bans.values() if b.is_active]
+
     def is_banned(self, user_id: str) -> Tuple[bool, Optional[str]]:
         """Check if a user is banned. Returns (banned, reason)."""
         ban = self._bans.get(user_id)

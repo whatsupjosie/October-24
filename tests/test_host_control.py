@@ -357,3 +357,57 @@ def test_the_walker_channel_counts_as_delivery(tmp_path, monkeypatch):
         assert c.post("/api/host/possess", headers=tok("josie"), json={"user_id": "mira"}).status_code == 200
         assert sock.sent[0]["type"] == "host_notice" and sock.sent[0]["text"] == NOTICE
         assert c.post("/api/host/possess", headers=tok("josie"), json={"user_id": "kay"}).status_code == 409   # kay has no socket anywhere
+
+
+def test_the_roster_joins_what_walkers_say_with_what_the_host_knows(tmp_path, monkeypatch):
+    from modules.pubworld_private import PubWorldPrivate
+    monkeypatch.setenv("PUBCAST_ENFORCE_AUTH", "1")
+
+    class S:
+        async def send_text(self, t): pass
+    reg = PubWorldPrivate(); reg.register("mira", S()); reg.update_presence("mira", {"room": "green_room", "pos": [1, 2], "fps": 30})
+    gov, hub = GovernanceEngine(tmp_path), FakeHub()
+    router = create_host_control_router(gov, hub, tmp_path, senders=[reg.send], roster=reg.roster)
+    reg.on_room_change = router.host.on_room_change
+    app = FastAPI(); app.include_router(router)
+    d = tmp_path / "host_control"; d.mkdir(); (d / "messages.json").write_text(json.dumps({"possession_notice": NOTICE}))
+    with TestClient(app) as c:
+        h = tok("josie")
+        assert c.get("/api/host/roster", headers=tok("v", "viewer")).status_code == 403
+        assert c.get("/api/host/roster", headers=tok("m", "mod")).status_code == 200
+        c.patch("/api/host/people/mira", headers=h, json={"title": "Lead", "position": "Floor", "tracked": True})
+        (p,) = c.get("/api/host/roster", headers=h).json()["people"]
+        assert p["user_id"] == "mira" and p["name"] == "mira" and p["title"] == "Lead" and p["position"] == "Floor" and p["tracked"] is True and p["room"] == "green_room"
+        assert p["possessed"] is None and p["timeout"] is None
+        c.post("/api/host/possess", headers=h, json={"user_id": "mira"})
+        assert c.get("/api/host/roster", headers=h).json()["people"][0]["possessed"]["by"] == "josie"
+        reg.update_presence("mira", {"room": "lobby"})                                          # tracked people get a line when they change room
+        log = c.get("/api/host/people/mira/log", headers=h).json()["log"]
+        assert "moved: green_room to lobby" in log
+        assert c.get("/api/host/roster", headers=h).json()["people"][0]["room"] == "lobby"
+
+
+def test_the_ban_list_shows_who_is_out_and_only_to_those_who_may_see_it(rig):
+    from modules.governance import BanType
+    assert rig.get("/api/host/bans", headers=tok("v", "viewer")).status_code == 403
+    assert rig.get("/api/host/bans", headers=tok("m", "mod")).json()["bans"] == []
+    rig.gov.ban_user("bo", "TEST REASON", "josie", BanType.PERMANENT)
+    rig.gov.ban_user("cy", "later", "josie", BanType.SESSION)
+    rig.gov.ban_user("di", "short", "josie", BanType.TEMPORARY, duration_hours=0.0001)       # runs out at once
+    import time as _t; _t.sleep(0.5)
+    bans = rig.get("/api/host/bans", headers=tok("m", "mod")).json()["bans"]
+    assert [(b["user_id"], b["kind"], b["reason"], b["by"]) for b in bans] == [("bo", "permanent", "TEST REASON", "josie"), ("cy", "session", "later", "josie")]
+    rig.gov.unban_user("bo", "josie")
+    assert [b["user_id"] for b in rig.get("/api/host/bans", headers=tok("m", "mod")).json()["bans"]] == ["cy"]
+
+
+def test_a_new_page_is_told_only_what_is_still_running(rig):
+    set_notices(rig, possession_notice=NOTICE, timeout_notice="TEST TIMEOUT")
+    host = rig.host
+    assert host.pending_for("mira") == []
+    asyncio.run(host.timeout("josie", "mira", DETENTION_ROOM, 60, "x"))
+    (ev,) = host.pending_for("MIRA")                                                         # any letter case
+    assert ev["type"] == "host_teleport" and ev["room"] == DETENTION_ROOM and ev["text"] == "TEST TIMEOUT" and ev["recording"] is True
+    host.timeouts["mira"]["until"] = 1                                                       # long over
+    assert host.pending_for("mira") == []
+    assert host.pending_for("someone-else") == []

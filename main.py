@@ -1209,7 +1209,10 @@ async def lifespan(application: FastAPI):
     # 7. Governance
     governance = GovernanceEngine(DATA_DIR)
     application.include_router(create_governance_router(governance, hub, authority_bridge=alex_bridge, authority_store=pub_manager_authority))
-    application.include_router(create_host_control_router(governance, hub, DATA_DIR, senders=[pubworld_private.send]))   # possession, timeout, profile, gifts, tracker log
+    host_router = create_host_control_router(governance, hub, DATA_DIR, senders=[pubworld_private.send], roster=pubworld_private.roster)   # possession, timeout, profile, gifts, tracker log, roster
+    pubworld_private.on_room_change = host_router.host.on_room_change
+    pubworld_private.pending_for = host_router.host.pending_for
+    application.include_router(host_router)
     logger.info("[7/12] Governance ready — bans, freeze, consent, waiting room")
 
     # 7b. PubWorld Hotspot API
@@ -4422,6 +4425,28 @@ async def set_preview_camera(source_id: str, identity: Dict[str, Any] = Depends(
 _pubworld_clients: dict[str, WebSocket] = {}
 pubworld_private = PubWorldPrivate()      # walker sockets whose owner is verified, for private host notices
 
+async def _walker_banned(ws: WebSocket, user_id: str) -> bool:
+    """A banned person may not stay on the walker: tell them (with the reason the host gave) and close the socket."""
+    banned, reason = governance.is_banned(user_id)
+    if not banned:
+        return False
+    try:
+        await ws.send_text(json.dumps({"type": "banned", "reason": str(reason or "")[:512]}))
+    except Exception:
+        pass
+    try:
+        await ws.close(code=4403)
+    except Exception:
+        pass
+    return True
+
+
+async def _replay_host_state(ws: WebSocket, user_id: str) -> None:
+    """A page that was reloaded or reconnected during a possession or a timeout must not come back free."""
+    for event in (pubworld_private.pending_for(user_id) if pubworld_private.pending_for else []):
+        await ws.send_text(json.dumps(event))
+
+
 @app.websocket("/pubworld/ws/{client_id}")
 async def pubworld_ws(ws: WebSocket, client_id: str):
     """PubWorld live channel with an in-band JWT handshake when auth is enforced.
@@ -4437,6 +4462,8 @@ async def pubworld_ws(ws: WebSocket, client_id: str):
 
     await ws.accept()
     actor_id = client_id
+    verified = False                                      # becomes true only when a valid token has proved who this is
+    probe, probe_id = None, 0                             # the host's own round-trip timing: (id, sent at)
 
     if auth_enforced():
         try:
@@ -4462,17 +4489,21 @@ async def pubworld_ws(ws: WebSocket, client_id: str):
             return
         await ws.send_text(json.dumps({"type": "auth_ok", "user_id": actor_id}))
 
+    if auth_enforced() and await _walker_banned(ws, actor_id):
+        return
     if client_id in _pubworld_clients:
         await ws.close(code=1008, reason="PubWorld client identifier already in use")
         return
     _pubworld_clients[client_id] = ws
     if auth_enforced():                                   # the handshake above proved who this is
-        pubworld_private.register(actor_id, ws)
+        pubworld_private.register(actor_id, ws); verified = True
 
     welcome_payload: dict = {"type": "welcome", "payload": {}}
     if hub:
         welcome_payload["payload"]["production_state"] = hub.get_production_state()
     await ws.send_text(json.dumps(welcome_payload))
+    if verified:
+        await _replay_host_state(ws, actor_id)
 
     try:
         while True:
@@ -4486,16 +4517,34 @@ async def pubworld_ws(ws: WebSocket, client_id: str):
                 continue
             msg_type = data.get("type", "")
 
+            if verified and await _walker_banned(ws, actor_id):         # banned while connected: out within one message (presence arrives every 2 s)
+                break
+
             if msg_type == "auth":
                 # a valid token in-band proves who this socket is, with or without enforced auth; a bad one proves nothing
                 proof = auth_module.decode_access_token(str(data.get("token") or "")) if data.get("token") else None
                 proven = str((proof or {}).get("sub") or "").strip()
-                if proven:
+                if proven and (not verified or proven.casefold() == actor_id.casefold()):     # once proved, a socket cannot become someone else
                     actor_id = proven
-                    pubworld_private.register(actor_id, ws)
+                    newly = not verified
+                    pubworld_private.register(actor_id, ws); verified = True
+                    if await _walker_banned(ws, actor_id):
+                        break
+                    await ws.send_text(json.dumps({"type": "auth_ok", "user_id": actor_id}))
+                    if newly:
+                        await _replay_host_state(ws, actor_id)
+                    continue
                 await ws.send_text(json.dumps({"type": "auth_ok", "user_id": actor_id}))
             elif msg_type == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
+            elif msg_type == "presence" and verified:
+                # where this verified walker is and how it is doing; the host's roster is built from these
+                pubworld_private.update_presence(actor_id, data)
+                if probe is None or time.monotonic() - probe[1] > 5.0:
+                    probe_id += 1; probe = (probe_id, time.monotonic())
+                    await ws.send_text(json.dumps({"type": "rtt_ping", "id": probe_id}))
+            elif msg_type == "rtt_pong" and verified and probe is not None and data.get("id") == probe[0]:
+                pubworld_private.set_rtt(actor_id, (time.monotonic() - probe[1]) * 1000.0); probe = None
             elif msg_type == "room_change":
                 room_id = data.get("room", "")
                 logger.debug("PubWorld client %s (%s) entered room %s", client_id, actor_id, room_id)

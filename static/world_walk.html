@@ -44,6 +44,31 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 #hostBanner .hb-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
 #hostBanner .hb-text { white-space: pre-line; font-size: 14px; }
 #hostBanner .hb-time { margin-top: 6px; color: var(--dim); font-size: 12px; }
+#screen { position: absolute; inset: 0; z-index: 20; background: #05060a; color: #eceef6; display: flex; align-items: center; justify-content: center; padding: 24px; }
+#screen[hidden] { display: none; }
+#screen .sc-box { max-width: 640px; text-align: center; }
+#screen .sc-title { font-size: 22px; font-weight: 600; margin-bottom: 14px; }
+#screen .sc-text { white-space: pre-line; font-size: 17px; line-height: 1.5; }
+#screen .sc-time { margin-top: 18px; color: #a3a8bd; }
+#hostPanel[hidden], #hpPerson[hidden], #hpOut[hidden] { display: none; }
+.hp-ban { display: flex; align-items: center; gap: 8px; justify-content: space-between; margin: 4px 0; }
+.hp-ban > span { min-width: 0; overflow-wrap: anywhere; }
+#hostPanel { border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 6px; }
+#hpRoster { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow: auto; }
+.hp-person { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 4px 8px; }
+.hp-person[aria-selected="true"] { border-color: var(--accent); background: rgba(255,211,107,.12); }
+.hp-ini { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--line); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; }
+.hp-main { flex: 1 1 auto; min-width: 0; }
+.hp-main > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-sub { color: var(--dim); font-size: 12px; }
+.hp-flag { color: var(--low); font-size: 12px; }
+#hpPerson fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 0; padding: 8px 10px 10px; }
+#hpPerson legend { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; padding: 0 4px; }
+#hpPerson label.col { display: block; margin: 5px 0; }
+#hpPerson label.col > input:not([type=checkbox]), #hpPerson label.col > textarea { display: block; width: 100%; margin-top: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+#hpPerson .hp-head { font-weight: 600; margin-top: 10px; }
+#hpPerson button.danger { border-color: var(--low); color: var(--low); }
+#hpStatus { min-height: 1.4em; margin-top: 8px; }
 #toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: rgba(10,10,16,.85); color: #fff; padding: 6px 14px; border-radius: 999px; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 90%; text-align: center; }
 #toast.on { opacity: 1; }
 #fade { position: absolute; inset: 0; background: #000; opacity: 0; transition: opacity .22s; pointer-events: none; }
@@ -90,9 +115,41 @@ textarea { width: 100%; height: 90px; background: var(--bg); color: var(--ink); 
     <div id="bubble" hidden role="dialog" aria-live="polite"></div>
     <div id="toast" role="status"></div>
     <div id="hostBanner" hidden role="alert" aria-live="assertive"><div class="hb-title"></div><div class="hb-text"></div><div class="hb-time"></div></div>
+    <div id="screen" hidden role="alertdialog" aria-modal="true" aria-labelledby="screenTitle" aria-describedby="screenText"><div class="sc-box"><div class="sc-title" id="screenTitle"></div><div class="sc-text" id="screenText"></div><div class="sc-time" id="screenTime"></div></div></div>
     <div id="fade"></div>
   </div>
   <aside id="panel">
+    <section id="hostPanel" hidden aria-label="Host controls">
+      <h2>Host</h2>
+      <div id="hpEmpty" class="small dim">Nobody is on the walker right now.</div>
+      <div id="hpRoster" role="listbox" aria-label="People on the walker"></div>
+      <div id="hpPerson" hidden>
+        <div class="hp-head"><span id="hpName"></span> <span id="hpBadges" class="hp-flag"></span></div>
+        <div id="hpStats" class="small"></div>
+        <fieldset><legend>Profile</legend>
+          <label class="col">Title <input id="hpTitle" maxlength="120"></label>
+          <label class="col">Position <input id="hpPosition" maxlength="120"></label>
+          <label class="col">Notes <textarea id="hpNotes" rows="3" maxlength="2000"></textarea></label>
+          <label><input type="checkbox" id="hpTracked"> Keep a daily log for this person</label>
+          <label><input type="checkbox" id="hpCtrlRoom"> May use the control room</label>
+          <div class="btnrow"><button id="hpSave">Save profile</button><button id="hpGiveAccess">Gift control room access</button></div>
+          <div class="btnrow"><input id="hpItem" placeholder="Accessory to gift" maxlength="120" aria-label="Accessory to gift"><button id="hpGiveItem">Gift it</button></div>
+          <div id="hpGifts" class="small dim"></div>
+        </fieldset>
+        <fieldset><legend>Control</legend>
+          <label class="col">Reason (kept in the record) <input id="hpReason" maxlength="300"></label>
+          <label class="col">Take control for (seconds) <input id="hpSecs" type="number" min="1" max="3600" value="600"></label>
+          <div class="btnrow"><button id="hpPossess">Take control</button><button id="hpRelease">Release</button><button id="hpDrive" aria-pressed="false">Walk them where I click: off</button></div>
+          <label class="col">Waiting room for (seconds) <input id="hpTSecs" type="number" min="1" max="3600" value="300"></label>
+          <div class="btnrow"><button id="hpTimeout">Send to waiting room</button><button id="hpEndTimeout">End waiting room</button></div>
+        </fieldset>
+        <fieldset><legend>Remove</legend>
+          <div class="btnrow"><button id="hpBoot" class="danger">Boot</button><button id="hpBan" class="danger">Ban for good</button></div>
+        </fieldset>
+      </div>
+      <div id="hpOut" hidden><h2>Out of the server</h2><div id="hpBanList" class="small"></div></div>
+      <div id="hpStatus" class="small" role="status" aria-live="polite"></div>
+    </section>
     <h2>Where</h2>
     <select id="viewSel" aria-label="Room and picture"></select>
 
@@ -856,8 +913,8 @@ function nearestWalkable(v, p, maxR) {
 /* Sitting at a station (the video switcher, the audio mixer ...) you do not walk: its keys are the station's, not the walker's. */
 const atStation = () => !!(window.PubCastKeymap && window.PubCastKeymap.isOpen && window.PubCastKeymap.isOpen());
 /* The host can also take the avatar (possession) or put this person in the disciplinary waiting room (timeout): then their own keys and clicks do not walk either. */
-S.host = { possessed: false, until: 0, timeout: null };
-const inputLocked = () => atStation() || S.host.possessed || !!S.host.timeout;
+S.host = { possessed: false, until: 0, timeout: null, banned: false };
+const inputLocked = () => atStation() || S.host.possessed || !!S.host.timeout || S.host.banned;
 function setTarget(pt, byHost) {
   if (pt && !byHost && inputLocked()) return;
   S.stall = null;
@@ -915,6 +972,7 @@ function checkDoors() {
   S.armed = false; showDoorBubble(near);
 }
 function frame(t) {
+  const rawDt = (t - (S.lastT || t)) / 1000; if (rawDt > 0) S.fps = S.fps ? S.fps * 0.9 + (1 / rawDt) * 0.1 : 1 / rawDt; S.frameAt = t;   // smoothed frames per second, shown on the host's roster
   const dt = Math.min(0.1, (t - (S.lastT || t)) / 1000); S.lastT = t; S.dt = dt;
   if (S.view) {
     const keyed = stepKeys(dt);
@@ -1025,6 +1083,7 @@ canvas.addEventListener("pointerdown", e => {
   const p = toPicture(e.clientX, e.clientY);
   if (p[0] < 0 || p[1] < 0 || p[0] > S.view.w || p[1] > S.view.h) return;
   hideBubble();
+  if (window.PubCastHostPanel && window.PubCastHostPanel.driveTo(S.view.zones.length ? snapToFloor(S.view, p) : p)) return;   // the host is walking someone else
   if (S.canArm === "place") {
     const ppi = ppiFor(sizingOf(S.view), p[1], null, zoneAt(S.view, p)), h = ppi ? Math.max(8, ppi * CAN_IN) : 24;
     canListNow().push({ x: p[0], y: p[1], h: Math.round(h), fy: null }); S.canSel = canListNow().length - 1; S.canArm = null;
@@ -1228,6 +1287,19 @@ function tickHostBanner(until) {
   hostBanner.querySelector(".hb-time").textContent = until ? "Time left " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0") : "";
 }
 setInterval(() => { if (!hostBanner.hidden) tickHostBanner(+hostBanner.dataset.until || 0); }, 1000);
+/* A full screen over the picture: the disciplinary waiting room, or removal from the server. The host's words are shown as plain text, exactly as sent. */
+const screenEl = $("screen");
+function showScreen(title, text, until) {
+  $("screenTitle").textContent = title; $("screenText").textContent = text || "";
+  screenEl.dataset.until = until || 0; screenEl.hidden = false; tickScreen();
+  $("panel").inert = true;                                   // no dropdown, no button behind the screen
+}
+function hideScreen() { screenEl.hidden = true; $("panel").inert = false; }
+function tickScreen() {
+  const until = +screenEl.dataset.until || 0, left = Math.max(0, Math.round((until - Date.now()) / 1000));
+  $("screenTime").textContent = until ? "Time left " + Math.floor(left / 60) + ":" + String(left % 60).padStart(2, "0") : "";
+}
+setInterval(() => { if (!screenEl.hidden) tickScreen(); }, 1000);
 function stopWhereYouStand() { HELD.clear(); S.target = null; S.path = []; }
 window.addEventListener("pubcast:host", e => {
   const m = e.detail || {}, h = S.host;
@@ -1239,12 +1311,232 @@ window.addEventListener("pubcast:host", e => {
   } else if (m.type === "host_release") {
     h.possessed = false; if (!h.timeout) hideHostBanner(); toast("Your avatar is yours again");
   } else if (m.type === "host_teleport") {
-    h.timeout = { room: String(m.room || ""), until: Number.isFinite(m.until) ? m.until * 1000 : 0 }; stopWhereYouStand();
-    showHostBanner("Waiting room", String(m.text || ""), h.timeout.until);
+    h.timeout = { room: String(m.room || ""), until: Number.isFinite(m.until) ? m.until * 1000 : 0 }; stopWhereYouStand(); hideBubble();
+    showScreen("Waiting room", String(m.text || ""), h.timeout.until);
   } else if (m.type === "host_timeout_end") {
-    h.timeout = null; if (!h.possessed) hideHostBanner(); toast("Your timeout is over");
+    h.timeout = null; if (!h.banned) hideScreen(); if (!h.possessed) hideHostBanner(); toast("Your timeout is over");
+  } else if (m.type === "banned") {
+    h.banned = true; h.timeout = null; stopWhereYouStand(); hideBubble(); hideHostBanner();
+    showScreen("Removed from the server", String(m.reason || ""), 0);
   }
 });
+
+/* ------------------------------ what the host's roster shows about you ---------- */
+function presenceNow() {
+  if (!S.room || !S.view) return null;
+  const G = window.PubCastGLB, gi = G && G.has(S.char) ? G.info(S.char) : null;
+  const live = typeof performance !== "undefined" && S.frameAt && performance.now() - S.frameAt < 1500;   // a hidden tab draws nothing: 0 fps
+  const t = S.host.timeout;
+  return { room: t ? t.room : S.room.id, view: t ? "" : S.view.id, pos: t ? null : [S.pos[0], S.pos[1]], char: S.char,
+           fps: live && S.fps ? Math.round(S.fps * 10) / 10 : 0,
+           meshes: gi ? gi.meshes : 0, bones: gi ? (gi.bones || 0) : 0, tris: gi ? (gi.tris || 0) : 0 };
+}
+
+/* ------------------------------ the host's own panel: who is here, their record, and what the host can do ---------- */
+/* Shown only when the host answers GET /api/host/state for this session (a moderator or above). Every action is the host's
+   own route and is checked and recorded there; this panel only asks, and prints the host's answer. */
+const HostPanel = (() => {
+  const P = { people: [], sel: null, me: "", driving: false, armed: null, timer: null, nodes: new Map(), record: null };
+  const WHY = {
+    possession_notice_not_set: "Taking control is off until the possession notice has been put in data/host_control/messages.json.",
+    target_not_connected: "That person is not connected on the walker, so they could not be told, and control was not taken.",
+    already_possessed: "This person is already under control.",
+    already_frozen: "This person was frozen another way; undo that first.",
+    audit_unavailable: "The record of host actions can't be written right now, so nothing was done.",
+    "not possessed": "This person is not under control.",
+    "not in timeout": "This person is not in the waiting room.",
+  };
+  const same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
+  const who = () => P.people.find(p => same(p.user_id, P.sel)) || null;
+  const status = text => { $("hpStatus").textContent = text || ""; };
+
+  async function api(method, path, body) {
+    let res;
+    try {
+      res = await fetch(path, { method, cache: "no-store", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    } catch (e) { return { ok: false, status: 0, text: "The host could not be reached." }; }
+    let data = null; try { data = await res.json(); } catch (e) { data = null; }
+    if (res.ok) return { ok: true, status: res.status, data };
+    const d = data && data.detail;
+    const text = res.status === 403 ? "Only an admin or the owner can do that."
+      : typeof d === "string" ? (Object.prototype.hasOwnProperty.call(WHY, d) ? WHY[d] : d)
+      : d ? JSON.stringify(d) : "The host answered " + res.status + ".";
+    return { ok: false, status: res.status, text };
+  }
+
+  const initials = n => String(n || "?").trim().split(/\s+/).slice(0, 2).map(w => w[0] || "").join("").toUpperCase() || "?";
+  function flags(p) { return [p.possessed ? "under your control" : "", p.timeout ? "in the waiting room" : "", p.tracked ? "logged" : ""].filter(Boolean).join(" · "); }
+
+  function renderRoster() {
+    const box = $("hpRoster"), seen = new Set();
+    for (const p of P.people) {
+      const key = String(p.user_id).toLowerCase(); seen.add(key);
+      let n = P.nodes.get(key);
+      if (!n) {
+        const b = el("button", undefined, "hp-person"); b.type = "button"; b.setAttribute("role", "option");
+        const ini = el("span", "", "hp-ini"), main = el("span", "", "hp-main"), a = el("span", ""), c = el("span", "", "hp-sub"), f = el("span", "", "hp-flag");
+        main.append(a, c, f); b.append(ini, main);
+        b.addEventListener("click", () => select(b.dataset.id));
+        n = { b, ini, a, c, f }; P.nodes.set(key, n);
+      }
+      n.b.dataset.id = p.user_id;
+      n.ini.textContent = initials(p.name);
+      n.a.textContent = p.name + (same(p.user_id, P.me) ? " (you)" : "");
+      n.c.textContent = (p.room || "somewhere") + (p.char ? " · " + p.char : "");
+      n.f.textContent = flags(p);
+      n.b.setAttribute("aria-selected", same(p.user_id, P.sel) ? "true" : "false");
+    }
+    for (const [key, n] of P.nodes) if (!seen.has(key)) { n.b.remove(); P.nodes.delete(key); }
+    const want = P.people.map(p => P.nodes.get(String(p.user_id).toLowerCase()).b);
+    if (want.some((b, i) => box.children[i] !== b) || box.children.length !== want.length) box.replaceChildren(...want);   // reorder only when the order changed, so focus stays put
+    $("hpEmpty").hidden = P.people.length > 0;
+  }
+
+  function renderStats() {
+    const p = who(), box = $("hpStats"); box.textContent = "";
+    if (!P.sel) return;
+    $("hpName").textContent = p ? p.name : (P.record && P.record.name) || P.sel;
+    $("hpBadges").textContent = p ? flags(p) : "";
+    if (!p) { box.appendChild(el("div", "Not on the walker right now.", "dim")); return; }
+    const num = (n, unit) => n == null ? "unknown" : (typeof n === "number" ? n.toLocaleString() : n) + (unit || "");
+    const lines = [
+      "Frame rate: " + (p.fps == null ? "unknown" : p.fps ? Math.round(p.fps) + " fps" : "page not drawing (hidden tab?)"),
+      "Round trip to the host: " + (p.rtt_ms == null ? "measuring" : Math.round(p.rtt_ms) + " ms"),
+      "Avatar: " + (p.meshes ? num(p.meshes) + " meshes, " + num(p.bones) + " bones, " + num(p.tris) + " triangles" : "flat figure (no 3D avatar)"),
+      "Walking as: " + (p.char || "unknown"),
+      "Where: " + (p.room || "unknown") + (p.view ? " / " + p.view : "") + (p.pos ? " at (" + Math.round(p.pos[0]) + ", " + Math.round(p.pos[1]) + ")" : ""),
+      "Last heard from: " + num(p.age, " s ago"),
+    ];
+    for (const l of lines) box.appendChild(el("div", l));
+    const me = same(P.sel, P.me);
+    for (const id of ["hpPossess", "hpRelease", "hpDrive", "hpTimeout", "hpEndTimeout", "hpBoot", "hpBan"]) $(id).disabled = me;
+  }
+
+  function fillRecord(rec) {
+    P.record = rec || {};
+    $("hpTitle").value = rec.title || ""; $("hpPosition").value = rec.position || ""; $("hpNotes").value = rec.notes || "";
+    $("hpTracked").checked = !!rec.tracked; $("hpCtrlRoom").checked = !!(rec.privileges && rec.privileges.control_room);
+    const g = rec.gifts || [];
+    $("hpGifts").textContent = g.length ? "Gifts so far: " + g.map(x => x.kind === "accessory" ? "accessory " + x.item : "control room access").join(", ") : "No gifts yet.";
+  }
+
+  async function select(id) {
+    P.sel = id; P.armed = null; setDriving(false); status("");
+    $("hpPerson").hidden = false; renderRoster(); renderStats();
+    const r = await api("GET", "/api/host/people/" + encodeURIComponent(id));
+    if (!same(P.sel, id)) return;                              // another person was picked while this loaded
+    if (r.ok) { fillRecord(r.data.person || {}); renderStats(); } else status(r.text);
+  }
+
+  function setDriving(on) {
+    P.driving = !!on;
+    const b = $("hpDrive"); b.setAttribute("aria-pressed", String(P.driving)); b.textContent = "Walk them where I click: " + (P.driving ? "on" : "off");
+  }
+  function sameView(p) { return !!(p && S.room && S.view && p.room === S.room.id && p.view === S.view.id); }
+  function driveTo(pt) {
+    if (!P.driving) return false;
+    const p = who();
+    if (!p || !p.possessed || !sameView(p)) { setDriving(false); status("Walking them stopped: they are no longer under your control or not in the picture you are looking at."); return false; }
+    api("POST", "/api/host/drive", { user_id: p.user_id, pos: [Math.round(pt[0] * 100) / 100, Math.round(pt[1] * 100) / 100] }).then(r => { if (!r.ok) status(r.text); });
+    return true;
+  }
+
+  const secs = id => Math.max(1, Math.min(3600, Math.round(+$(id).value) || 0));
+  async function act(label, method, path, body, after) {
+    status(label + "…");
+    const r = await api(method, path, body);
+    status(r.ok ? (after ? after(r.data) : "Done.") : r.text);
+    poll();
+    return r;
+  }
+  const arm = (what, button, text) => {
+    if (P.armed && P.armed.what === what && P.armed.id === P.sel) { P.armed = null; button.textContent = button.dataset.label; return true; }
+    P.armed = { what, id: P.sel }; button.textContent = text;
+    clearTimeout(P.armTimer); P.armTimer = setTimeout(() => { P.armed = null; button.textContent = button.dataset.label; }, 6000);
+    return false;
+  };
+
+  function wire() {
+    for (const id of ["hpBoot", "hpBan"]) $(id).dataset.label = $(id).textContent;
+    $("hpSave").addEventListener("click", async () => {
+      if (!P.sel) return;
+      const was = !!(P.record && P.record.privileges && P.record.privileges.control_room);
+      let r = await api("PATCH", "/api/host/people/" + encodeURIComponent(P.sel), {
+        title: $("hpTitle").value, position: $("hpPosition").value, notes: $("hpNotes").value, tracked: $("hpTracked").checked });
+      if (r.ok && $("hpCtrlRoom").checked !== was) r = await api("PUT", "/api/host/people/" + encodeURIComponent(P.sel) + "/privileges/control_room", { value: $("hpCtrlRoom").checked });
+      if (r.ok) { fillRecord(r.data.person || {}); status("Profile saved."); } else status(r.text);
+      poll();
+    });
+    $("hpGiveAccess").addEventListener("click", async () => {
+      const r = await act("Gifting access", "POST", "/api/host/people/" + encodeURIComponent(P.sel) + "/gifts", { kind: "control_room_access" }, () => "Control room access gifted.");
+      if (r.ok) fillRecord(r.data.person || {});
+    });
+    $("hpGiveItem").addEventListener("click", async () => {
+      const item = $("hpItem").value.trim(); if (!item) { status("Type the accessory first."); return; }
+      const r = await act("Gifting", "POST", "/api/host/people/" + encodeURIComponent(P.sel) + "/gifts", { kind: "accessory", item }, () => "Gifted: " + item + ".");
+      if (r.ok) { fillRecord(r.data.person || {}); $("hpItem").value = ""; }
+    });
+    $("hpPossess").addEventListener("click", () => act("Taking control", "POST", "/api/host/possess",
+      { user_id: P.sel, reason: $("hpReason").value, duration_seconds: secs("hpSecs") }, d => "You have control. It ends on its own at " + new Date(d.until * 1000).toLocaleTimeString() + "."));
+    $("hpRelease").addEventListener("click", () => { setDriving(false); return act("Releasing", "POST", "/api/host/release", { user_id: P.sel }, () => "Released."); });
+    $("hpDrive").addEventListener("click", () => {
+      if (P.driving) { setDriving(false); return; }
+      const p = who();
+      if (!p || !p.possessed) { status("Take control first."); return; }
+      if (!sameView(p)) { status("To walk them, open the picture they are in: " + (p.room || "?") + " / " + (p.view || "?") + "."); return; }
+      setDriving(true); status("Click the floor and they walk there. Click the button again to stop.");
+    });
+    $("hpTimeout").addEventListener("click", () => act("Sending to the waiting room", "POST", "/api/host/timeout",
+      { user_id: P.sel, reason: $("hpReason").value, duration_seconds: secs("hpTSecs") }, d => d.delivered ? "They are in the waiting room." : "Recorded, but nobody on the walker received it (they are not connected). It will show when they reconnect."));
+    $("hpEndTimeout").addEventListener("click", () => act("Ending the waiting room", "POST", "/api/host/end-timeout", { user_id: P.sel }, () => "They are out."));
+    $("hpBoot").addEventListener("click", () => {
+      if (!arm("boot", $("hpBoot"), "Click again to boot")) return;
+      act("Booting", "POST", "/api/governance/kick", { user_id: P.sel, reason: $("hpReason").value }, () => "Booted.");
+    });
+    $("hpBan").addEventListener("click", () => {
+      if (!arm("ban", $("hpBan"), "Click again to ban for good")) return;
+      act("Banning", "POST", "/api/governance/ban", { user_id: P.sel, reason: $("hpReason").value, ban_type: "permanent" }, () => "Banned.");
+    });
+  }
+
+  const KIND = { permanent: "banned for good", session: "booted (until the app restarts)", temporary: "banned for a while" };
+  function renderBans(list) {
+    const sig = JSON.stringify(list);
+    if (sig === P.bansSig) return;                              // unchanged: leave the buttons alone so focus is not lost
+    P.bansSig = sig;
+    const box = $("hpBanList"); box.textContent = "";
+    for (const b of list) {
+      const row = el("div", undefined, "hp-ban"), what = el("span", b.user_id + " (" + (KIND[b.kind] || b.kind) + ")" + (b.reason ? ": " + b.reason : ""));
+      const btn = el("button", "Let back in"); btn.type = "button";
+      btn.addEventListener("click", () => act("Letting back in", "POST", "/api/governance/unban", { user_id: b.user_id }, () => "Lifted. If they are still on the removed screen they need to reload the page."));
+      row.append(what, btn); box.appendChild(row);
+    }
+    $("hpOut").hidden = list.length === 0;
+  }
+  async function poll() {
+    if (document.hidden && P.people.length) return;
+    const [r, bans] = await Promise.all([api("GET", "/api/host/roster"), api("GET", "/api/host/bans")]);
+    if (!r.ok) { if (r.status === 401 || r.status === 403 || r.status === 404) stop(); return; }
+    P.people = Array.isArray(r.data.people) ? r.data.people : [];
+    renderRoster(); renderStats();
+    if (bans.ok) renderBans(Array.isArray(bans.data.bans) ? bans.data.bans : []);
+  }
+  function stop() { clearInterval(P.timer); P.timer = null; $("hostPanel").hidden = true; }
+
+  async function init() {
+    const L = window.PubCastLive;
+    if (!L || !(await L.start())) return false;
+    const a = window.ReachAuth, u = (a && a.getUser && a.getUser()) || {};
+    P.me = String(u.user_id || u.username || "");
+    const r = await api("GET", "/api/host/state");
+    if (!r.ok) return false;                                   // not a host (or no host control here): the panel stays out of sight
+    $("hostPanel").hidden = false; wire();
+    await poll(); P.timer = setInterval(poll, 2000);
+    return true;
+  }
+  return { init, driveTo, poll, state: P };
+})();
+window.PubCastHostPanel = HostPanel;
 
 /* ------------------------------ your progress (kept on the host) ---------- */
 function libraryEntry(id) { return S.library.find(a => a.id === id) || null; }
@@ -1337,6 +1629,8 @@ window.PubCastWalk = {
     if (q.get("refs") === "1") { S.show.refs = true; $("shRefs").checked = true; }
     if (q.get("occ") === "1") { S.show.occ = true; $("shOcc").checked = true; }
     document.documentElement.dataset.ready = "1";
+    if (L) L.setPresence(presenceNow);
+    HostPanel.init().catch(() => { /* no host panel for this session */ });
     requestAnimationFrame(frame);
   } catch (e) {
     toast("Could not start: " + e.message, 8000);

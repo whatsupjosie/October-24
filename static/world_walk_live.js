@@ -107,6 +107,10 @@
       // "pubcast:host" and decides what to show; this file only passes them on.
       case "host_notice": case "host_drive": case "host_release": case "host_teleport": case "host_timeout_end":
         global.dispatchEvent(new CustomEvent("pubcast:host", { detail: msg })); break;
+      // Removed by the host (boot or ban): do not reconnect; the walker shows the reason the host gave.
+      case "banned": stopped = true; clearTimeout(reconnectTimer); setOnline(false); global.dispatchEvent(new CustomEvent("pubcast:host", { detail: msg })); break;
+      // The host measures the round trip to this page by sending an id and timing the answer (shown on the host's roster).
+      case "rtt_ping": send({ type: "rtt_pong", id: msg.id }); break;
       default: break;                                         // pong, room_ack, hotspot_result: nothing to do
     }
   }
@@ -235,6 +239,19 @@
     sc.onload = () => { if (state.room) global.dispatchEvent(new CustomEvent("pubcast:room", { detail: { room: state.room } })); };
     global.document.head.appendChild(sc);
   }
+  /* What the host's roster shows about this walker: where it is, who it walks as, how smoothly the page runs, and how heavy
+     its avatar is. The page hands in a function that returns that snapshot; it is sent every PRESENCE_MS while the socket is
+     ready (the host forgets a walker that is silent for 15 s, so a closed page leaves the roster by itself). */
+  const PRESENCE_MS = 2000;
+  let presenceFn = null, presenceTimer = null;
+  function setPresence(fn) { presenceFn = typeof fn === "function" ? fn : null; sendPresence(); }
+  function sendPresence() {
+    if (!presenceFn || !state.ready) return false;
+    let p = null;
+    try { p = presenceFn(); } catch (e) { p = null; }
+    return p && typeof p === "object" ? send(Object.assign({}, p, { type: "presence" })) : false;
+  }
+
   let starting = null;
   /* Resolves to whether the host is there; starts the live link once (safe to call any number of times). */
   function start() {
@@ -245,11 +262,12 @@
       loadAudioRuntime();
       setTimeout(connect, CONNECT_DELAY_MS);
       pingTimer = setInterval(() => send({ type: "ping" }), PING_MS);
+      presenceTimer = setInterval(sendPresence, PRESENCE_MS);
       return true;
     })();
     return starting;
   }
-  function stop() { stopped = true; clearInterval(pingTimer); pingTimer = null; clearTimeout(reconnectTimer); try { if (ws) ws.close(); } catch (e) { /* closed */ } setOnline(false); }
+  function stop() { stopped = true; clearInterval(pingTimer); pingTimer = null; clearInterval(presenceTimer); presenceTimer = null; clearTimeout(reconnectTimer); try { if (ws) ws.close(); } catch (e) { /* closed */ } setOnline(false); }
 
   /* ---- Bella Faux Pas progress on the host (modules/studio_progress.py): one record per signed-in owner ---- */
   const PROGRESS_URL = "/api/studio/progress";
@@ -306,6 +324,6 @@
   }
 
   global.PubCastLive = { state, actionFor, use, call, describe, enterView, start, stop, ACTION_BY_ID,
-                         loadProgress, saveProgress, flushProgress, avatarLibrary };
+                         loadProgress, saveProgress, flushProgress, avatarLibrary, setPresence, sendPresence };
   start();
 })(window);

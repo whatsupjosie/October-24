@@ -1,6 +1,6 @@
 # Host control of characters ("like The Sims"): spec and map to existing code, 2026-10-29, Claude
 
-Status: DESIGN ONLY. Nothing here is built. The "what exists" part was read from the code, not run.
+Status: the server half and the walker panel are built and tested; see `HOST_CONTROL_SERVER_2026-10-29.md` for what is done and not. This file keeps the spec and Josie's words.
 
 ## Josie's words, 2026-10-29, exactly as she gave them (not edited)
 

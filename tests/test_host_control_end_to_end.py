@@ -250,15 +250,267 @@ def test_the_walker_shows_the_notice_locks_the_person_follows_the_host_and_hands
             page.wait_for_function("document.getElementById('hostBanner').hidden", timeout=5000)
             here = pos(); walk_keys("ArrowDown"); assert pos() != here
 
-            # timeout: the waiting room banner shows (with the configured wording), input is locked, and it lifts when it ends
+            # timeout: the waiting room fills the picture (with the configured wording), input is locked, and it lifts when it ends
+            screen = page.locator("#screen")
             assert api(base, "POST", "/api/host/timeout", json={"user_id": "walker-mira", "duration_seconds": 60}).status_code == 200
-            page.wait_for_function("!document.getElementById('hostBanner').hidden", timeout=5000)
-            assert "Waiting room" in banner.inner_text() and "TEST TIMEOUT" in banner.inner_text()
+            page.wait_for_function("!document.getElementById('screen').hidden", timeout=5000)
+            assert "Waiting room" in screen.inner_text() and "TEST TIMEOUT" in screen.inner_text()
             held = pos(); walk_keys("ArrowDown"); assert pos() == held
             assert api(base, "POST", "/api/host/end-timeout", json={"user_id": "walker-mira"}).status_code == 200
-            page.wait_for_function("document.getElementById('hostBanner').hidden", timeout=5000)
+            page.wait_for_function("document.getElementById('screen').hidden", timeout=5000)
             walk_keys("ArrowUp"); assert pos() != held
             assert errors == []
             ctx.close()
+        finally:
+            browser.close()
+
+
+
+# ── roster, presence, reconnect, removal: through the real sockets ─────────────
+
+async def drain_closing(ws, seconds=2.0):
+    """Everything the socket delivers until it closes (or the time is up), and the close code if it closed."""
+    got, code = [], None
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            got.append(json.loads(await asyncio.wait_for(ws.recv(), max(0.05, end - time.time()))))
+        except asyncio.TimeoutError:
+            break
+        except websockets.exceptions.ConnectionClosed as closed:
+            code = closed.rcvd.code if closed.rcvd else None
+            break
+    return got, code
+
+
+async def _until(predicate, seconds=10.0, step=0.2):
+    end = time.time() + seconds
+    while time.time() < end:
+        got = predicate()
+        if got:
+            return got
+        await asyncio.sleep(step)
+    return predicate()
+
+
+def test_a_walker_that_reports_in_appears_on_the_roster_with_its_numbers_and_round_trip(host):
+    base, port, _ = host
+
+    async def run():
+        ws = await walker(port, "pw_roster1", tok("roster-ann", "guest"))
+        try:
+            await ws.send(json.dumps({"type": "presence", "room": "dressing_room", "view": "main", "pos": [120.5, 340], "char": "pete",
+                                      "fps": 58.4, "meshes": 3, "bones": 65, "tris": 41000}))
+            ping = None
+            for m in await drain(ws, 1.5):
+                if m["type"] == "rtt_ping":
+                    ping = m
+            assert ping and isinstance(ping["id"], int), "the host should time the round trip with a ping"
+            await ws.send(json.dumps({"type": "rtt_pong", "id": ping["id"]}))
+            await asyncio.sleep(0.3)
+            people = api(base, "GET", "/api/host/roster").json()["people"]
+            me = next(p for p in people if p["user_id"] == "roster-ann")
+            assert (me["room"], me["view"], me["pos"], me["char"]) == ("dressing_room", "main", [120.5, 340.0], "pete")
+            assert (me["fps"], me["meshes"], me["bones"], me["tris"]) == (58.4, 3, 65, 41000)
+            assert me["rtt_ms"] is not None and me["rtt_ms"] < 5000
+            # a wrong id proves nothing and moves nothing
+            await ws.send(json.dumps({"type": "rtt_pong", "id": ping["id"] + 99}))
+            # a viewer may read the roster, a guest may not
+            assert api(base, "GET", "/api/host/roster", who="vi", role="viewer").status_code == 403
+        finally:
+            await ws.close()
+        await asyncio.sleep(0.3)
+        assert all(p["user_id"] != "roster-ann" for p in api(base, "GET", "/api/host/roster").json()["people"]), "a closed socket leaves the roster at once"
+    asyncio.run(run())
+
+
+def test_a_page_reloaded_during_a_timeout_or_possession_comes_back_still_held(host):
+    base, port, _ = host
+
+    async def run():
+        ws = await walker(port, "pw_replay1", tok("replay-ria", "guest"))
+        assert api(base, "POST", "/api/host/timeout", json={"user_id": "replay-ria", "duration_seconds": 60}).status_code == 200
+        first = [m for m in await drain(ws, 1.0) if m["type"] == "host_teleport"]
+        assert len(first) == 1
+        await ws.close()
+        ws2 = await walker(port, "pw_replay2", tok("replay-ria", "guest"))             # the reloaded page
+        again = [m for m in await drain(ws2, 1.0) if m["type"] == "host_teleport"]
+        assert len(again) == 1 and again[0]["until"] == first[0]["until"] and again[0]["text"] == "TEST TIMEOUT"
+        assert api(base, "POST", "/api/host/end-timeout", json={"user_id": "replay-ria"}).status_code == 200
+        assert [m["type"] for m in await drain(ws2, 0.5)] == ["host_timeout_end"]
+        await ws2.close()
+        # once it is over a reconnect is free
+        ws3 = await walker(port, "pw_replay3", tok("replay-ria", "guest"))
+        assert [m for m in await drain(ws3, 0.6) if m["type"] in ("host_teleport", "host_notice")] == []
+        # possession is replayed the same way
+        assert api(base, "POST", "/api/host/possess", json={"user_id": "replay-ria", "duration_seconds": 60}).status_code == 200
+        assert any(m["type"] == "host_notice" for m in await drain(ws3, 0.8))
+        await ws3.close()
+        ws4 = await walker(port, "pw_replay4", tok("replay-ria", "guest"))
+        back = [m for m in await drain(ws4, 1.0) if m["type"] == "host_notice"]
+        assert len(back) == 1 and back[0]["text"] == NOTICE
+        assert api(base, "POST", "/api/host/release", json={"user_id": "replay-ria"}).status_code == 200
+        await ws4.close()
+    asyncio.run(run())
+
+
+def test_a_banned_person_is_put_out_of_the_walker_and_cannot_come_back(host):
+    base, port, _ = host
+
+    async def run():
+        ws = await walker(port, "pw_ban1", tok("ban-bo", "guest"))
+        r = api(base, "POST", "/api/governance/ban", json={"user_id": "ban-bo", "reason": "TEST REASON", "ban_type": "permanent"})
+        assert r.status_code == 200, r.text
+        await ws.send(json.dumps({"type": "presence", "room": "dressing_room"}))          # presence arrives every 2 s in the real page
+        got, code = await drain_closing(ws, 3.0)
+        assert [m for m in got if m["type"] == "banned"] == [{"type": "banned", "reason": "TEST REASON"}] and code == 4403
+        # coming back is refused at the door
+        ws2 = await websockets.connect(f"ws://127.0.0.1:{port}/pubworld/ws/pw_ban2")
+        await ws2.send(json.dumps({"type": "auth", "token": tok("ban-bo", "guest")}))
+        got2, code2 = await drain_closing(ws2, 3.0)
+        seen = [m["type"] for m in got2]
+        assert "banned" in seen and "welcome" not in seen and code2 == 4403
+        assert all(p["user_id"] != "ban-bo" for p in api(base, "GET", "/api/host/roster").json()["people"])
+        # somebody else is untouched
+        ok = await walker(port, "pw_ban3", tok("not-banned-bea", "guest"))
+        await ok.close()
+    asyncio.run(run())
+
+
+# ── the host's panel, in a real browser, acting on a second real browser ───────
+
+def _session(ctx, user, role):
+    token = tok(user, role)
+    ctx.add_init_script("sessionStorage.setItem('pubcast_token', %s); sessionStorage.setItem('pubcast_user', JSON.stringify({username:%s,user_id:%s,role:%s}));"
+                        % (json.dumps(token), json.dumps(user), json.dumps(user), json.dumps(role)))
+
+
+def _status(page, pattern, timeout=8000):
+    """Wait for the panel's status line to match; on failure say what it actually said."""
+    try:
+        page.wait_for_function("(re) => new RegExp(re).test(document.getElementById('hpStatus').textContent)", arg=pattern, timeout=timeout)
+    except sync_api.TimeoutError:
+        raise AssertionError(f"panel status never matched {pattern!r}; it says {page.locator('#hpStatus').inner_text()!r}") from None
+
+
+def test_the_owner_runs_the_walker_from_the_host_panel_and_a_guest_never_sees_it(host):
+    base, port, data = host
+    with sync_api.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(args=["--no-sandbox"])
+        except Exception as exc:
+            pytest.skip(f"no Chromium available: {exc}")
+        try:
+            errors = []
+            owner_ctx = browser.new_context(viewport={"width": 1400, "height": 900}); _session(owner_ctx, "panel-owner", "owner")
+            guest_ctx = browser.new_context(viewport={"width": 1100, "height": 800}); _session(guest_ctx, "panel-nia", "guest")
+            A = owner_ctx.new_page(); B = guest_ctx.new_page()
+            for pg in (A, B):
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.goto(base + "/walk")
+                pg.wait_for_function("document.documentElement.dataset.ready === '1' && window.PubCastLive && window.PubCastLive.state.online === true", timeout=30000)
+
+            # a guest's page has no host panel at all
+            B.wait_for_timeout(1500)
+            assert B.locator("#hostPanel").is_hidden()
+
+            # the owner's page lists the guest, with numbers from the guest's page
+            A.wait_for_function("!document.getElementById('hostPanel').hidden", timeout=15000)
+            row = A.locator('#hpRoster button[data-id="panel-nia"]')
+            row.wait_for(timeout=15000)
+            row.click()
+            A.wait_for_function("document.getElementById('hpName').textContent === 'panel-nia'", timeout=5000)
+            A.wait_for_function("/Round trip to the host: \\d+ ms/.test(document.getElementById('hpStats').textContent)", timeout=15000)
+            stats = A.locator("#hpStats").inner_text()
+            assert "Frame rate:" in stats and "flat figure" in stats and "Walking as: pete" in stats, stats
+
+            # the guest puts on a real 3D avatar: the roster shows what that avatar costs, measured from the file the page loaded
+            B.click("#glbMannequin")
+            B.wait_for_function("window.PubCastGLB.has('pete')", timeout=30000)
+            info = B.evaluate("window.PubCastGLB.info('pete')")
+            assert info["meshes"] >= 1 and info["bones"] >= 10 and info["tris"] >= 1000, info
+            want = f"{info['meshes']:,} meshes, {info['bones']:,} bones, {info['tris']:,} triangles"
+            A.wait_for_function("(w) => document.getElementById('hpStats').textContent.includes(w)", arg=want, timeout=15000)
+            B.click("#glbClear")
+            A.wait_for_function("document.getElementById('hpStats').textContent.includes('flat figure')", timeout=15000)
+
+            # profile: edits are kept on the host
+            A.fill("#hpTitle", "Bartender"); A.fill("#hpNotes", "Works the late shift"); A.check("#hpTracked"); A.check("#hpCtrlRoom")
+            A.click("#hpSave")
+            _status(A, "^Profile saved\\.$")
+            rec = api(base, "GET", "/api/host/people/panel-nia").json()["person"]
+            assert rec["title"] == "Bartender" and rec["notes"] == "Works the late shift" and rec["tracked"] is True and rec["privileges"]["control_room"] is True
+            A.fill("#hpItem", "top hat"); A.click("#hpGiveItem")
+            _status(A, "^Gifted: top hat\\.$")
+            assert any(g["item"] == "top hat" for g in api(base, "GET", "/api/host/people/panel-nia").json()["person"]["gifts"])
+
+            # take control from the panel: the guest is told in the configured words and stops walking by themselves
+            A.fill("#hpReason", "panel test"); A.click("#hpPossess")
+            _status(A, "You have control")
+            B.wait_for_function("!document.getElementById('hostBanner').hidden", timeout=8000)
+            assert NOTICE in B.locator("#hostBanner").inner_text()
+            A.wait_for_function("/under your control/.test(document.getElementById('hpRoster').textContent)", timeout=8000)
+
+            # "walk them where I click": the owner clicks the floor of the same picture and the guest walks there, the owner does not
+            hold = A.evaluate("window.PubCastWalk.S.pos.slice()")
+            b0 = B.evaluate("window.PubCastWalk.S.pos.slice()")
+            goal = A.evaluate("(p) => window.PubCastWalk.snapToFloor(window.PubCastWalk.S.view, [p[0] + 140, p[1]])", b0)
+            sx, sy = A.evaluate("(g) => window.PubCastWalk.toScreen(g)", goal)
+            A.click("#hpDrive")
+            A.wait_for_function("document.getElementById('hpDrive').getAttribute('aria-pressed') === 'true'", timeout=5000)
+            box = A.locator("#c").bounding_box(); A.mouse.click(box["x"] + sx, box["y"] + sy)
+            B.wait_for_function("(g) => Math.hypot(window.PubCastWalk.S.pos[0] - g[0], window.PubCastWalk.S.pos[1] - g[1]) < 8", arg=goal, timeout=40000)
+            assert A.evaluate("window.PubCastWalk.S.pos.slice()") == hold, "the owner's own avatar must not walk while the owner is walking someone else"
+
+            # release from the panel
+            A.click("#hpRelease")
+            B.wait_for_function("document.getElementById('hostBanner').hidden", timeout=8000)
+            assert A.locator("#hpDrive").get_attribute("aria-pressed") == "false"
+
+            # waiting room from the panel: the guest's whole picture is replaced; the roster shows where they are; a reload does not free them
+            A.fill("#hpTSecs", "90"); A.click("#hpTimeout")
+            B.wait_for_function("!document.getElementById('screen').hidden", timeout=8000)
+            assert "TEST TIMEOUT" in B.locator("#screen").inner_text()
+            A.wait_for_function("/in the waiting room/.test(document.getElementById('hpRoster').textContent)", timeout=8000)
+            A.wait_for_function("/waiting_room_disciplinary/.test(document.getElementById('hpStats').textContent)", timeout=10000)
+            B.reload()
+            B.wait_for_function("document.documentElement.dataset.ready === '1' && window.PubCastLive.state.online === true", timeout=30000)
+            B.wait_for_function("!document.getElementById('screen').hidden", timeout=8000)
+            assert "TEST TIMEOUT" in B.locator("#screen").inner_text()
+            b_pos = B.evaluate("window.PubCastWalk.S.pos.slice()"); B.keyboard.down("ArrowDown"); B.wait_for_timeout(500); B.keyboard.up("ArrowDown")
+            assert B.evaluate("window.PubCastWalk.S.pos.slice()") == b_pos
+            A.click("#hpEndTimeout")
+            B.wait_for_function("document.getElementById('screen').hidden", timeout=8000)
+
+            # ban from the panel needs a second click; then the guest is shown the host's reason and is not let back
+            A.fill("#hpReason", "PANEL BAN REASON")
+            A.click("#hpBan")
+            assert "Click again" in A.locator("#hpBan").inner_text()
+            A.click("#hpBan")
+            B.wait_for_function("!document.getElementById('screen').hidden", timeout=15000)
+            text = B.locator("#screen").inner_text()
+            assert "Removed from the server" in text and "PANEL BAN REASON" in text
+            B.wait_for_timeout(5000)                                         # it must not reconnect by itself
+            assert B.evaluate("window.PubCastLive.state.online") is False
+            A.wait_for_function("document.querySelector('#hpRoster button[data-id=\"panel-nia\"]') === null", timeout=10000)
+
+            # the ban shows in "Out of the server" with the reason, and can be undone from the same panel
+            A.wait_for_function("!document.getElementById('hpOut').hidden && /panel-nia \\(banned for good\\): PANEL BAN REASON/.test(document.getElementById('hpBanList').textContent)", timeout=10000)
+            A.locator("#hpBanList .hp-ban", has_text="panel-nia").locator("button").click()          # others may be out too (ban-bo, from the socket test)
+            _status(A, "Lifted")
+            A.wait_for_function("!document.getElementById('hpBanList').textContent.includes('panel-nia')", timeout=10000)
+            B.reload()
+            B.wait_for_function("document.documentElement.dataset.ready === '1' && window.PubCastLive.state.online === true", timeout=30000)
+            assert B.locator("#screen").is_hidden()
+            A.locator('#hpRoster button[data-id="panel-nia"]').wait_for(timeout=15000)
+
+            # the host's own record of all this: every action was written down, by the owner, against the guest
+            body = api(base, "GET", "/api/governance/audit?limit=500").json()
+            entries = body if isinstance(body, list) else (body.get("entries") or body.get("log") or [])
+            mine = {e["action"] for e in entries if "panel-nia" in json.dumps(e)}
+            assert {"POSSESS", "RELEASE", "TIMEOUT", "TIMEOUT_END"} <= mine, sorted(mine)
+            assert api(base, "GET", "/api/host/people/panel-nia/log").json()["log"], "a tracked person's day is logged"
+            assert [e for e in errors if "WSHub" not in e] == [], errors
+            owner_ctx.close(); guest_ctx.close()
         finally:
             browser.close()

@@ -10,8 +10,8 @@ of live functionality.
 Ledgers: `handoffs/CONTROL_PAGE_INTEGRATION_2026-10-29.md`, `HOST_CONTROL_SERVER_2026-10-29.md`, `KEYMAP_2026-10-29.md`, `CAMERA_CONTROL_MODES_2026-10-29.md`.
 
 - The Control page's Vision Mixer (Cut, Fade, sources, Preview, Program) now works and takes assignable keys; a Camera station moves a real camera and records, saves and replays moves exactly.
-- Host control server half (possession, timeout, profile, gifts, tracker log) and the walker's reaction to it. No roster or panel yet.
-- Real-browser tests against the real app pass for all of the above; see the ledgers for what is untested.
+- Host control is in the walker (`/walk`): the walker reports in (room, spot, who they walk as, frame rate, round trip, avatar size measured from the loaded file); a Host panel for a moderator or above lists who is there and does profile, gifts, take control, "walk them where I click", the disciplinary waiting room (a plain full-screen screen showing Josie's configured text, not a place in the world), boot and ban. A banned person is put out of the walker and refused on return. A reload does not free someone in a timeout or possession.
+- Real-browser tests against the real app pass for all of the above (two browsers, owner and guest); see the ledgers for what is untested (two machines, Windows, ban across restart, auth-off behaviour).
 
 ## 2026-10-28: saving across PubCast (in progress)
 

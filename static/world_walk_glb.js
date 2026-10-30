@@ -99,6 +99,13 @@ async function load(character, url, label) {
   let meshCount = 0, skinned = 0;
   root.traverse(o => { if (o.isMesh) { meshCount++; if (o.isSkinnedMesh) skinned++; o.frustumCulled = false; } });
   if (!meshCount) throw new Error("that file has no mesh in it");
+  // how heavy the avatar is: triangles drawn per frame and bones that move (what the host's roster shows as its complexity)
+  let tris = 0; const boneSet = new Set();
+  root.traverse(o => {
+    if (o.isMesh && o.geometry) { const g = o.geometry; tris += g.index ? g.index.count / 3 : (g.attributes.position ? g.attributes.position.count / 3 : 0); }
+    if (o.isSkinnedMesh && o.skeleton) for (const b of o.skeleton.bones) boneSet.add(b);
+  });
+  tris = Math.round(tris);
   const norm = normalise(root);
   const mixer = skinned && gltf.animations.length ? new THREE.AnimationMixer(norm.wrap) : null;
   const walk = findClip(gltf.animations, /walk/i), idle = findClip(gltf.animations, /idle|stand|breath/i);
@@ -110,10 +117,11 @@ async function load(character, url, label) {
   const normalMaterials = new Map(), holo = hologramMaterial();
   root.traverse(o => { if (o.isMesh) normalMaterials.set(o, o.material); });
   const inst = { character, label: label || character, group: norm.wrap, mixer, actions, yaw: 0, wWalk: 0, phase: 0,
-                 clips: gltf.animations.map(a => a.name), nativeHeight: norm.nativeHeight, meshCount, skinned, normalMaterials, holo };
+                 clips: gltf.animations.map(a => a.name), nativeHeight: norm.nativeHeight, meshCount, skinned, normalMaterials, holo,
+                 tris, bones: boneSet.size };
   const old = avatars.get(character); if (old) dispose(old);
   avatars.set(character, inst);
-  return { clips: inst.clips, nativeHeight: inst.nativeHeight, meshes: meshCount, skinned, hasWalk: !!walk, hasIdle: !!idle };
+  return { clips: inst.clips, nativeHeight: inst.nativeHeight, meshes: meshCount, skinned, hasWalk: !!walk, hasIdle: !!idle, tris, bones: inst.bones };
 }
 
 function dispose(inst) {
@@ -172,7 +180,7 @@ function draw(ctx, character, cx, fy, H, motion) {
 function setHologram(on) { state.hologram = !!on; }
 function info(character) {
   const i = avatars.get(character); if (!i) return null;
-  return { label: i.label, clips: i.clips, nativeHeight: i.nativeHeight, meshes: i.meshCount, skinned: i.skinned };
+  return { label: i.label, clips: i.clips, nativeHeight: i.nativeHeight, meshes: i.meshCount, skinned: i.skinned, tris: i.tris, bones: i.bones };
 }
 
 window.PubCastGLB = { load, clear, has, draw, setHologram, info, state };

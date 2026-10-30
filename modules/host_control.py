@@ -315,13 +315,45 @@ class HostControl:
         self.log.add(target, "timeout_end", f"by {actor}" + (" (timer)" if automatic else ""))
         return {"ok": True}
 
+    def pending_for(self, person: str) -> List[Dict[str, Any]]:
+        """What a newly connected page of this person must be told: a possession or timeout that is still running."""
+        key, now, out = _k(person), time.time(), []
+        cur = self.possessed.get(key)
+        if cur and cur["until"] > now:
+            notice = self.notice("possession_notice")
+            if notice:
+                out.append({"type": "host_notice", "kind": "possession", "text": notice, "until": cur["until"]})
+        cur = self.timeouts.get(key)
+        if cur and cur["until"] > now:
+            event = {"type": "host_teleport", "room": cur["room"], "until": cur["until"], "recording": True}
+            text = self.notice("timeout_notice")
+            if text:
+                event["text"] = text
+            out.append(event)
+        return out
+
+    def on_room_change(self, person: str, left: str, entered: str) -> None:
+        """Called by the walker socket registry when a verified person changes room. Tracked people get a line in their record."""
+        if self.record(person).get("tracked"):
+            self.log.add(person, "moved", f"{left or 'somewhere'} to {entered or 'somewhere'}")
+
     def state(self) -> Dict[str, Any]:
         return {"possessed": self.possessed, "timeouts": self.timeouts}
+
+    def roster(self, entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Who is on the walker right now, with what the host knows about each of them."""
+        out = []
+        for e in entries:
+            rec, key = self.record(e["user_id"]), _k(e["user_id"])
+            out.append(dict(e, name=rec.get("name") or e["user_id"], title=rec.get("title", ""), position=rec.get("position", ""), tracked=bool(rec.get("tracked")),
+                            privileges=rec.get("privileges", {}), gifts=len(rec.get("gifts") or []),
+                            possessed=self.possessed.get(key), timeout=self.timeouts.get(key)))
+        return out
 
 
 # ── routes ──────────────────────────────────────────────────────────────────────
 
-def create_host_control_router(gov: Any, hub: Any, data_dir: Path, senders: Optional[List[Any]] = None) -> APIRouter:
+def create_host_control_router(gov: Any, hub: Any, data_dir: Path, senders: Optional[List[Any]] = None, roster: Optional[Any] = None) -> APIRouter:
     host = HostControl(gov, hub, data_dir, senders)
     router = APIRouter(prefix="/api/host", tags=["host-control"])
     router.host = host  # type: ignore[attr-defined]
@@ -338,6 +370,16 @@ def create_host_control_router(gov: Any, hub: Any, data_dir: Path, senders: Opti
     @router.get("/state")
     async def state(identity: Dict[str, Any] = Depends(require_role(READ_ROLE))):
         return {"ok": True, **host.state()}
+
+    @router.get("/roster")
+    async def read_roster(identity: Dict[str, Any] = Depends(require_role(READ_ROLE))):
+        return {"ok": True, "people": host.roster(roster() if roster else [])}
+
+    @router.get("/bans")
+    async def read_bans(identity: Dict[str, Any] = Depends(require_role(READ_ROLE))):
+        """Who is out, so a boot or a ban can be undone from the same screen (lifting goes through /api/governance/unban)."""
+        return {"ok": True, "bans": [{"user_id": b.user_id, "kind": b.ban_type.value, "reason": b.reason, "by": b.issued_by, "at": b.issued_at,
+                                      "until": b.expires_at} for b in sorted(gov.active_bans(), key=lambda b: b.issued_at)]}
 
     @router.get("/people/{person}")
     async def read_person(person: str, identity: Dict[str, Any] = Depends(require_role(READ_ROLE))):
