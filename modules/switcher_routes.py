@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from .route_security import require_role
@@ -19,6 +20,21 @@ class SwitcherService:
         return {"program":getattr(p,"source_id",None),"preview":getattr(v,"source_id",None),
                 "transition":dict(self.transition),"sources":[{"id":c.source_id,"name":c.name,"transport":c.transport.value,"endpoint":c.endpoint} for c in self.cameras.list_sources()]}
     def preview(self,camera_id:str)->bool: return self.cameras.set_preview_source(camera_id)
+    def select(self, program: str, preview: str) -> bool:
+        """Set a pair of confirmed, registered sources in one checked operation.
+
+        Prevents the 2.5D stage from leaving only Program switched if Preview
+        selection fails during package activation.
+        """
+        if not self.cameras.get(program) or not self.cameras.get(preview):
+            return False
+        if not self.cameras.set_program_source(program):
+            return False
+        if not self.cameras.set_preview_source(preview):
+            return False
+        self.transition = {"type":"cut","duration_ms":0}
+        self.director.manual_cut(program)
+        return True
     def cut(self,camera_id:Optional[str]=None, *, retain_transition:bool=False)->bool:
         # A take without an explicit source is an actual Program/Preview exchange,
         # not setting Program while leaving Preview stuck on the same camera.
@@ -37,6 +53,8 @@ class SwitcherService:
             raise ValueError("transition duration must be 0 to 4000 ms")
         previous=dict(self.transition)
         self.transition={"type":transition,"duration_ms":duration_ms}
+        if transition == "dissolve":
+            self.transition["started_at"] = time.time()
         try: ok=self.cut(camera_id,retain_transition=True)
         except Exception:
             self.transition=previous
@@ -65,6 +83,13 @@ def create_switcher_router(service:SwitcherService)->APIRouter:
     r=APIRouter(prefix="/api/switcher",tags=["Director Switcher"])
     @r.get("/state")
     async def state(): return service.state()
+    @r.post("/select")
+    async def select_pair(body:Dict[str,Any], identity:Dict[str,Any]=Depends(require_role("mod"))):
+        program, preview = body.get("program"), body.get("preview")
+        if not isinstance(program,str) or not isinstance(preview,str) or not program or not preview:
+            raise HTTPException(400,"program and preview camera IDs are required")
+        if not service.select(program,preview): raise HTTPException(404,"one or both cameras not registered")
+        return service.state()
     @r.post("/preview/{camera_id}")
     async def preview(camera_id:str, identity:Dict[str,Any]=Depends(require_role("mod"))):
         if not service.preview(camera_id): raise HTTPException(404,"camera not found")
