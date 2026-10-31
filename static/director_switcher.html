@@ -840,8 +840,9 @@ function renderAux(containerId, offset) {
   cameras.slice(offset, offset + 3).forEach(cam => {
     const mon = document.createElement("div");
     mon.className = "monitor";
-    const unavailable = cam.id === "cam4" || cam.id === "cam5";
-    mon.innerHTML = `<div class="feed-title">${cam.shot}</div><div class="feed"><div class="feed-grid"></div><div class="feed-name" style="font-size:18px">${cam.label}</div><div class="feed-source ${unavailable ? "unavailable" : ""}">${unavailable ? "FEED UNAVAILABLE" : "LOCAL PREVIEW"}</div></div>`;
+    // Source presence is not proof of a decoded video feed.
+    const unavailable = true;
+    mon.innerHTML = `<div class="feed-title">${escapeHTML(cam.shot)}</div><div class="feed"><div class="feed-grid"></div><div class="feed-name" style="font-size:18px">${escapeHTML(cam.label)}</div><div class="feed-source unavailable">VIDEO FEED NOT BOUND</div></div>`;
     node.appendChild(mon);
   });
 }
@@ -914,11 +915,12 @@ async function refreshAudioTruth() {
 function updateMonitors() {
   $("programName").textContent = cameraById(program).label;
   $("previewName").textContent = cameraById(preview).label;
-  $("programSource").textContent = backendTruth.studio?.available ? "BACKEND STATE - VIDEO FEED UNBOUND" : "LOCAL PREVIEW - NOT A LIVE FEED";
-  $("programSource").className = "feed-source" + (backendTruth.studio?.available ? " real" : "");
-  $("previewSource").textContent = backendTruth.studio?.available ? "STANDBY STATE - VIDEO FEED UNBOUND" : "LOCAL PREVIEW - STANDBY";
-  $("previewSource").className = "feed-source" + (backendTruth.studio?.available ? " real" : "");
-  setTruthCard("truthScene", backendTruth.studio?.available ? "ok" : "warn", `${cameraById(program).shot} / ${cameraById(preview).shot}`, backendTruth.studio?.available ? "Studio backend available; monitor still needs real video feed binding" : "Local switcher state; no fake live video shown");
+  $("programSource").textContent = backendTruth.switcher?.sources ? "SERVER SWITCH STATE — VIDEO FEED UNBOUND" : "SWITCHER UNVERIFIED — NO LIVE FEED";
+  $("programSource").className = "feed-source unavailable";
+  $("previewSource").textContent = backendTruth.switcher?.sources ? "SERVER PREVIEW STATE — VIDEO FEED UNBOUND" : "PREVIEW UNVERIFIED — NO LIVE FEED";
+  $("previewSource").className = "feed-source unavailable";
+  setTruthCard("truthScene","warn",`${cameraById(program).shot} / ${cameraById(preview).shot}`,
+    backendTruth.switcher?.sources ? "Shared camera state confirmed; video decoder not connected" : "Switcher unavailable; no live video claimed");
   renderButtons();
 }
 
@@ -1210,7 +1212,7 @@ function init() {
   log("switcher ready");
   setTruthCard("truthExport", "warn", "Check", "Backend not polled yet");
   refreshTruth();
-  setInterval(refreshTruth, 10000);
+  setInterval(refreshTruth, 2000);
   tick();
 }
 init();
