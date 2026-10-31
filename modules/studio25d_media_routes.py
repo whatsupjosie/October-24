@@ -130,11 +130,18 @@ def create_studio25d_media_router(
             raise HTTPException(429, "Frame rate exceeded", headers={"Retry-After": "0.1"})
         if source_id not in frames and len(frames) >= MAX_SOURCES:
             raise HTTPException(503, "Studio confidence feed capacity reached")
+        if request.headers.get("content-length"):
+            try:
+                claimed_length = int(request.headers["content-length"])
+            except ValueError:
+                raise HTTPException(400, "Invalid Content-Length") from None
+            if claimed_length < 0 or claimed_length > MAX_BYTES:
+                raise HTTPException(413, "Confidence frame is too large")
         data = bytearray()
         async for piece in request.stream():
-            data.extend(piece)
-            if len(data) > MAX_BYTES:
+            if len(piece) > MAX_BYTES - len(data):
                 raise HTTPException(413, "Confidence frame is too large")
+            data.extend(piece)
         try:
             width, height = jpeg_dimensions(bytes(data))
         except ValueError as exc:
