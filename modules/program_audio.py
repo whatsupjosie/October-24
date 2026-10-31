@@ -20,6 +20,7 @@ VALID_ACTIONS = {"play", "stop", "stop_all", "set_volume", "mute", "unmute", "st
 class ProgramAudioState:
     bus_volumes: Dict[str, float] = field(default_factory=lambda: {bus: 1.0 for bus in VALID_BUSES})
     muted_buses: set[str] = field(default_factory=set)
+    master_volume: float = 1.0  # One shared program master, used by all studio environments
     active_sources: Dict[str, int] = field(default_factory=lambda: {bus: 0 for bus in VALID_BUSES})
     dialogue_active: int = 0
     command_seq: int = 0
@@ -43,6 +44,7 @@ class ProgramAudioState:
 
     def status(self) -> Dict[str, Any]:
         return {
+            "master_volume": self.master_volume,
             "buses": {
                 bus: {
                     "volume": self.bus_volumes.get(bus, 1.0),
@@ -70,7 +72,7 @@ def validate_audio_event(event: Dict[str, Any]) -> Dict[str, Any]:
     if action not in VALID_ACTIONS:
         raise ValueError(f"unsupported audio action: {action}")
     bus = str(event.get("bus") or "sfx")
-    if action not in {"stop_all", "status"} and bus not in VALID_BUSES:
+    if action not in {"stop_all", "status"} and bus not in VALID_BUSES and not (action == "set_volume" and bus == "master"):
         raise ValueError(f"unsupported audio bus: {bus}")
     if 'director_announcement' in event and not isinstance(event['director_announcement'], bool):
         raise ValueError('director_announcement must be a boolean')
@@ -89,7 +91,10 @@ def apply_audio_event(state: ProgramAudioState, event: Dict[str, Any]) -> Dict[s
     action = event["action"]
     bus = event.get("bus", "sfx")
     if action == "set_volume":
-        state.bus_volumes[bus] = clamp_volume(event.get("volume", 1.0))
+        if bus == "master":
+            state.master_volume = clamp_volume(event.get("volume", 1.0))
+        else:
+            state.bus_volumes[bus] = clamp_volume(event.get("volume", 1.0))
     elif action == "mute":
         state.muted_buses.add(bus)
     elif action == "unmute":
