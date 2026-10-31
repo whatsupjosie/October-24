@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - pubcast-25d-production-integration-2026-10-30
+      - lead-engineering-control-room-tv-studio-2026-10-31
   workflow_dispatch:
 
 jobs:
