@@ -212,9 +212,10 @@ function cleanupMedia(){
  for(const track of state.micStream?.getTracks()||[])track.stop();
  try{state.micSource?.disconnect()}catch(_){}
  try{state.micGain?.disconnect()}catch(_){}
+ try{state.programMixSource?.disconnect()}catch(_){}
  if(state.audioContext&&state.audioContext.state!=="closed")state.audioContext.close().catch(console.warn);
  state.videoStream=null;state.micStream=null;state.audioContext=null;
- state.micSource=null;state.micGain=null;state.micAnalyser=null;state.audioDest=null;
+ state.micSource=null;state.micGain=null;state.micAnalyser=null;state.audioDest=null;state.programMixSource=null;
 }
 async function startRecording(){
  if(!state.session)throw Error("Start a production before recording");
@@ -228,18 +229,30 @@ async function startRecording(){
    state.videoStream=el.program.captureStream(30);
    if(!state.videoStream.getVideoTracks().length)throw Error("No video track from program canvas");
    const combined=new MediaStream([...state.videoStream.getVideoTracks()]);
-   if(el.mic.checked){
-     if(!navigator.mediaDevices?.getUserMedia)throw Error("Microphone capture unavailable; deselect mic to record silent video");
-     state.micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+   const programAudio=window.PubcastProgramAudio;
+   // A single recording track combines the established program mixer and an
+   // optional microphone. Never create a competing dialogue/music/SFX bus graph.
+   if(programAudio?.captureOutputStream || el.mic.checked){
      const AC=window.AudioContext||window.webkitAudioContext;
-     if(!AC)throw Error("Web Audio mixer unavailable");
+     if(!AC)throw Error("Web Audio mix-to-record unavailable");
      state.audioContext=new AC();await state.audioContext.resume();
-     state.micSource=state.audioContext.createMediaStreamSource(state.micStream);
-     state.micGain=state.audioContext.createGain();state.micGain.gain.value=state.microphoneMuted?0:state.microphoneLevel;
-     state.micAnalyser=state.audioContext.createAnalyser();state.micAnalyser.fftSize=256;
      state.audioDest=state.audioContext.createMediaStreamDestination();
-     state.micSource.connect(state.micGain);state.micGain.connect(state.micAnalyser);
-     state.micAnalyser.connect(state.audioDest); // recorded, not looped to loudspeakers
+     if(programAudio?.captureOutputStream){
+       const liveMix=programAudio.captureOutputStream();
+       await programAudio.context?.resume?.();
+       if(!liveMix.getAudioTracks().length)throw Error("Shared program mixer has no capture track");
+       state.programMixSource=state.audioContext.createMediaStreamSource(liveMix);
+       state.programMixSource.connect(state.audioDest);
+     }
+     if(el.mic.checked){
+       if(!navigator.mediaDevices?.getUserMedia)throw Error("Microphone capture unavailable; deselect mic to record without microphone");
+       state.micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+       state.micSource=state.audioContext.createMediaStreamSource(state.micStream);
+       state.micGain=state.audioContext.createGain();state.micGain.gain.value=state.microphoneMuted?0:state.microphoneLevel;
+       state.micAnalyser=state.audioContext.createAnalyser();state.micAnalyser.fftSize=256;
+       state.micSource.connect(state.micGain);state.micGain.connect(state.micAnalyser);
+       state.micAnalyser.connect(state.audioDest); // recording, never local speaker loopback
+     }
      for(const track of state.audioDest.stream.getAudioTracks())combined.addTrack(track);
    }
    const rec=new MediaRecorder(combined,mime?{mimeType:mime,videoBitsPerSecond:3000000}:{videoBitsPerSecond:3000000});
@@ -247,7 +260,8 @@ async function startRecording(){
    rec.ondataavailable=e=>{if(e.data?.size)state.recordedChunks.push(e.data)};
    rec.onerror=e=>{state.mediaError=e.error||Error("MediaRecorder error")};
    rec.start(1000);state.recorder=rec;
-   emit("recording.start",{mime:state.recordingMime,audio:!!state.micStream,canvas:[Core.W,Core.H]});
+   emit("recording.start",{mime:state.recordingMime,microphone:!!state.micStream,
+     sharedProgramMix:!!state.programMixSource,canvas:[Core.W,Core.H]});
    log("REC START "+state.recordingMime+" / microphone "+(state.micStream?"ON":"OFF"));setControls();
  }catch(e){cleanupMedia();state.recorder=null;setControls();throw e;}
 }
