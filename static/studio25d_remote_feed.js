@@ -56,8 +56,18 @@
        // Decode *before* marking the monitor as carrying a real frame.
        const decode=options.decode||(typeof createImageBitmap==="function"?async b=>{
          const image=await createImageBitmap(b);image.close();
-       }:null);
-       if(decode)await decode(blob);
+       }:async b=>{
+         if(typeof Image==="undefined")throw Error("No JPEG decoder available");
+         const tempURL=urlAPI.createObjectURL(b),image=new Image();
+         try{
+           image.src=tempURL;
+           if(typeof image.decode==="function")await image.decode();
+           else await new Promise((resolve,reject)=>{
+             image.onload=resolve;image.onerror=()=>reject(Error("JPEG decoder rejected frame"));
+           });
+         }finally{urlAPI.revokeObjectURL(tempURL);}
+       });
+       await decode(blob);
        if(stopped||gen!==entry.generation||entry.source!==source)return false;
        const newURL=urlAPI.createObjectURL(blob),old=entry.url;
        entry.url=newURL;target.image.src=newURL;target.image.hidden=false;
