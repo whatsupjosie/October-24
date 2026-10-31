@@ -841,7 +841,6 @@ function renderAux(containerId, offset) {
     const mon = document.createElement("div");
     mon.className = "monitor";
     // Source presence is not proof of a decoded video feed.
-    const unavailable = true;
     mon.innerHTML = `<div class="feed-title">${escapeHTML(cam.shot)}</div><div class="feed"><div class="feed-grid"></div><div class="feed-name" style="font-size:18px">${escapeHTML(cam.label)}</div><div class="feed-source unavailable">VIDEO FEED NOT BOUND</div></div>`;
     node.appendChild(mon);
   });
@@ -938,7 +937,19 @@ function syncVideoSwitcherState(snapshot){
   preview=cameras.find(c=>c.sourceId===snapshot.preview)?.id||preview;
   backendTruth.switcher=snapshot;
   updateMonitors();
+  renderAux("auxLeft",0);renderAux("auxRight",2);
   return true;
+}
+let lastSwitcherSignature="";
+async function refreshSwitcherState() {
+  try {
+    const response=await fetch("/api/switcher/state",{cache:"no-store"});
+    if(!response.ok)return;
+    const data=await response.json();
+    if(!Array.isArray(data.sources))return;
+    const signature=JSON.stringify({program:data.program,preview:data.preview,sources:data.sources.map(x=>[x.id,x.name])});
+    if(signature!==lastSwitcherSignature){lastSwitcherSignature=signature;syncVideoSwitcherState(data);}
+  }catch(_) { /* 10-second truth refresh owns visible connection diagnostics. */ }
 }
 async function videoAction(path,payload,description){
   const result=await postJSON(path,payload);
@@ -1212,7 +1223,8 @@ function init() {
   log("switcher ready");
   setTruthCard("truthExport", "warn", "Check", "Backend not polled yet");
   refreshTruth();
-  setInterval(refreshTruth, 2000);
+  setInterval(refreshTruth, 10000);
+  setInterval(refreshSwitcherState, 1000);
   tick();
 }
 init();
