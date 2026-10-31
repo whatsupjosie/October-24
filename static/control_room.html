@@ -146,7 +146,33 @@ const MODE_BTN_MAP={auto:'dAuto',news:'dNews',documentary:'dDoc',cinematic:'dCin
 const studioActions=window.PubCastStudioConsoleHotspots?new window.PubCastStudioConsoleHotspots.StudioConsoleHotspots():null;
 let pgm='cam1',pvw='cam2',isRec=false,recStart=0,mode='auto',ws=null,activeRecordingSessionId='';
 let audioMuted=[false,false,true,false,false];
-function cam(id){return CAMS.find(c=>c.id===id)||CAMS[0]}
+function cam(id){return CAMS.find(c=>c.id===id)||null}
+async function syncSwitcherState(snapshot){
+  if(!snapshot||!Array.isArray(snapshot.sources))throw Error("Canonical switcher state unavailable");
+  const sources=snapshot.sources.slice(0,5);
+  for(let i=0;i<sources.length;i++){
+    const c=sources[i];CAMS[i]={id:"cam"+(i+1),n:String(i+1),l:c.name||c.id,sourceId:c.id};
+  }
+  const program=CAMS.find(c=>c.sourceId===snapshot.program);
+  const preview=CAMS.find(c=>c.sourceId===snapshot.preview);
+  pgm=program?.id||"external";pvw=preview?.id||"external";
+  updateUI();
+  if(!program&&snapshot.program)document.getElementById("pgmFeedText").textContent="EXTERNAL: "+snapshot.program;
+  if(!preview&&snapshot.preview)document.getElementById("pvwCamText").textContent="EXTERNAL PVW";
+}
+async function sharedSwitcher(path){
+  const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"}});
+  if(!response.ok)throw Error(path+" HTTP "+response.status);
+  const payload=await response.json();await syncSwitcherState(payload);
+  return payload;
+}
+async function refreshCanonical(){
+  try{
+    const response=await fetch("/api/switcher/state",{cache:"no-store"});
+    if(!response.ok)throw Error("HTTP "+response.status);
+    await syncSwitcherState(await response.json());
+  }catch(e){const sr=document.getElementById("srCam");if(sr)sr.textContent="SWITCHER UNVERIFIED: "+e.message;}
+}
 async function runStudioAction(actionId,payload={},spec=null){
   try{
     if(!studioActions)throw new Error('studio action adapter unavailable');
@@ -171,12 +197,25 @@ function updateUI(){
   document.getElementById('srRec').textContent='REC: '+(isRec?'â— ON':'OFF');
   document.getElementById('tRec').className='hotspot rect'+(isRec?' rec-active':'');
 }
-function setPGM(id){pgm=id;updateUI();runStudioAction('camera.switch.program',{source_id:cam(id).sourceId});wsSend({type:'production_state',payload:{camera:id}})}
-function setPVW(id){pvw=id;updateUI();runStudioAction('camera.switch.preview',{source_id:cam(id).sourceId})}
-function cut(){const o=pgm;pgm=pvw;pvw=o;updateUI();runStudioAction('camera.cut',{});wsSend({type:'production_state',payload:{camera:pgm}})}
+async function setPGM(id){
+  const source=cam(id);if(!source)return;
+  try{await sharedSwitcher("/api/switcher/cut/"+encodeURIComponent(source.sourceId));}
+  catch(e){document.getElementById("srCam").textContent="PROGRAM FAILED: "+e.message;}
+}
+async function setPVW(id){
+  const source=cam(id);if(!source)return;
+  try{await sharedSwitcher("/api/switcher/preview/"+encodeURIComponent(source.sourceId));}
+  catch(e){document.getElementById("srCam").textContent="PREVIEW FAILED: "+e.message;}
+}
+async function cut(){
+  try{await sharedSwitcher("/api/switcher/cut");}
+  catch(e){document.getElementById("srCam").textContent="CUT FAILED: "+e.message;}
+}
 async function toggleRec(){
   if(!isRec){
-    const started=await runStudioAction('recording.start',{session_id:`image_console_${Date.now()}`,sources:[cam(pgm).sourceId],profile_id:'broadcast_mp4',countdown_seconds:0},{safety:'confirm',label:'Start recording'});
+    const source=cam(pgm);
+    if(!source){document.getElementById("srRec").textContent="REC BLOCKED: NO VERIFIED PROGRAM";return;}
+    const started=await runStudioAction('recording.start',{session_id:`image_console_${Date.now()}`,sources:[source.sourceId],profile_id:'broadcast_mp4',countdown_seconds:0},{safety:'confirm',label:'Start recording'});
     if(!started||!started.result||!started.result.session_id)return;
     activeRecordingSessionId=started.result.session_id;isRec=true;recStart=Date.now();
   }else{
@@ -186,24 +225,67 @@ async function toggleRec(){
   }
   document.getElementById('hudRec').classList.toggle('on',isRec);document.getElementById('liveTag').style.display=isRec?'block':'none';updateUI()
 }
-function panic(){audioMuted=[true,true,true,true,true];pgm='black';updateUI();runStudioAction('audio.stop_all',{});wsSend({type:'production_state',payload:{camera:'black',on_air:false}})}
-function muteAll(){audioMuted=[true,true,true,true,true];runStudioAction('audio.stop_all',{});updateUI()}
-function cycleAudio(i){audioMuted[i]=!audioMuted[i];const buses=['dialogue','dialogue','dialogue','music','ui'];runStudioAction('audio.event',{action:audioMuted[i]?'mute':'unmute',bus:buses[i]||'sfx'});updateUI()}
-function setMode(m){mode=m;updateUI();wsSend({type:'signal',payload:{action:'set_director_mode',mode:m}})}
+async function panic(){
+  try{
+    const response=await fetch("/api/production/panic",{method:"POST"});
+    if(!response.ok)throw Error("HTTP "+response.status);
+    const result=await response.json();
+    if(activeRecordingSessionId&&result.sessions_stopped?.includes(activeRecordingSessionId)){
+      isRec=false;document.getElementById("hudRec").classList.remove("on");
+    }
+    if(result.blackout_cued)document.getElementById("pgmFeedText").textContent="PANIC BLACKOUT CUED";
+    document.getElementById("srMode").textContent=result.ok?"PANIC CONFIRMED":"PANIC PARTIAL: "+(result.capture_errors?.length||0)+" ERRORS";
+    if(!result.ok)console.warn("PANIC partial failure",result.capture_errors);
+  }catch(e){document.getElementById("srMode").textContent="PANIC FAILED: "+e.message;}
+}
+async function muteAll(){
+  try{
+    for(const event of [{action:"stop_all"},{action:"set_volume",bus:"master",volume:0}]){
+      const response=await fetch("/api/program-audio/event",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify(event)});
+      if(!response.ok)throw Error("HTTP "+response.status);
+    }
+    audioMuted=[true,true,true,true,true];
+    document.getElementById("srMode").textContent="PROGRAM AUDIO STOPPED / MASTER 0";
+  }catch(e){document.getElementById("srMode").textContent="MUTE FAILED: "+e.message;}
+}
+async function cycleAudio(i){
+  const bus=["dialogue","music","sfx","vtr","room"][i];
+  if(!bus)return;
+  const next=!audioMuted[i];
+  try{
+    const response=await fetch("/api/program-audio/event",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({action:next?"mute":"unmute",bus})});
+    if(!response.ok)throw Error("HTTP "+response.status);
+    const result=await response.json();if(!result.ok)throw Error("Audio command not acknowledged");
+    audioMuted[i]=next;
+    document.getElementById("srMode").textContent=bus.toUpperCase()+" "+(next?"MUTED":"UNMUTED");
+  }catch(e){document.getElementById("srMode").textContent="AUDIO FAILED: "+e.message;}
+}
+function setMode(m){
+  // A WebSocket request is not an ACK. Display pending until a server event confirms.
+  const sr=document.getElementById("srMode");
+  sr.textContent="MODE REQUESTED: "+m.toUpperCase();
+  wsSend({type:'signal',payload:{action:'set_director_mode',mode:m}});
+}
 function firePreset(p){({showOpen:()=>setPGM('cam1'),interview:()=>setPGM('cam2'),wide:()=>setPGM('cam1'),showClose:()=>setPGM('cam1')})[p]?.()}
 document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   switch(e.key){case'1':setPGM('cam1');break;case'2':setPGM('cam2');break;case'3':setPGM('cam3');break;case'4':setPGM('cam4');break;case'5':setPGM('cam5');break;case' ':e.preventDefault();cut();break;case'r':case'R':toggleRec();break;case'Escape':panic();break;case'm':case'M':muteAll();break;case'd':case'D':mode=MODES[(MODES.indexOf(mode)+1)%MODES.length];updateUI();break}
 });
-setInterval(()=>{const now=new Date();const tc=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}:${String(Math.floor(Math.random()*30)).padStart(2,'0')}`;document.getElementById('pgmTc').textContent=tc;document.getElementById('pvwTc').textContent=tc.slice(0,8);document.getElementById('chkTc').textContent=tc.slice(0,8);if(isRec){const s=Math.floor((Date.now()-recStart)/1000);document.getElementById('hudTime').textContent=`${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}},250);
+setInterval(()=>{const now=new Date();const tc=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}:${String(Math.floor(now.getMilliseconds()/1000*30)).padStart(2,'0')}`;document.getElementById('pgmTc').textContent=tc;document.getElementById('pvwTc').textContent=tc.slice(0,8);document.getElementById('chkTc').textContent=tc.slice(0,8);if(isRec){const s=Math.floor((Date.now()-recStart)/1000);document.getElementById('hudTime').textContent=`${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}},250);
+// These timecode digits are wall-clock estimates, not recorder synchronization.
+document.getElementById('pgmTc').title='Wall-clock estimate only; not embedded media timecode';
+setInterval(()=>refreshCanonical().catch(()=>{}),1200);
+refreshCanonical();
 function connectWS(){try{ws=new WebSocket(window.ReachAuth.websocketURL('/ws/controlroom'));ws.onmessage=e=>{try{const m=JSON.parse(e.data);handleWsEvent(m);if(typeof window.__pubcastStationsHook==='function')window.__pubcastStationsHook(m)}catch{}};ws.onclose=()=>setTimeout(connectWS,3000)}catch{}}
 function handleWsEvent(m){
   switch(m.type){
     case 'director_cut':
-      if(m.data?.to_camera) setPGM(m.data.to_camera);
+      refreshCanonical();
       break;
     case 'production_state':
-      if(m.payload?.camera) setPGM(m.payload.camera);
+      if(m.payload?.camera) refreshCanonical();
       if(m.payload?.on_air !== undefined){ document.getElementById('liveTag').style.display=m.payload.on_air?'block':'none'; }
       if(m.payload?.mode) { mode=m.payload.mode; updateUI(); }
       break;
