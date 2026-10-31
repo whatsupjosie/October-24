@@ -52,6 +52,12 @@
        if(!Number.isFinite(age)||age>5000)throw Error("Frame is stale");
        const blob=await response.blob();
        if(!blob||!blob.size||blob.size>240000)throw Error("Invalid frame size");
+       // A transport ACK alone does not prove a JPEG can be decoded.
+       // Decode *before* marking the monitor as carrying a real frame.
+       const decode=options.decode||(typeof createImageBitmap==="function"?async b=>{
+         const image=await createImageBitmap(b);image.close();
+       }:null);
+       if(decode)await decode(blob);
        if(stopped||gen!==entry.generation||entry.source!==source)return false;
        const newURL=urlAPI.createObjectURL(blob),old=entry.url;
        entry.url=newURL;target.image.src=newURL;target.image.hidden=false;
