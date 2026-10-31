@@ -11,3 +11,12 @@ Two-minute stall rule: record actual attempts/errors here; avoid repeated unchan
 - Registration of per-genre sources currently persists in CameraManager after a 2.5D production ends; cleanup must be safe for other active operators. Do not blindly reset global Program/Preview when stopping.
 - Audio master and bus state now share the backend; media output from a DIFFERENT BROWSER PAGE is not automatically captured by the 2.5D local recorder. Cross-client audio ingest remains to be engineered and tested.
 - Live browser and FastAPI verification remain unperformed. Local clone attempt blocked by DNS earlier; no executed pytest or Node test suite yet. Isolated source/module mock checks are documented separately.
+
+## Three-round continuation blockers and facts
+1. **No local clone:** Container DNS could not resolve github.com/raw.githubusercontent.com. Connected GitHub connector can fetch/edit source, but cannot provide a mounted complete checkout. Node and Python suites have NOT been run as true repository commands.
+2. **CI jobs opaque:** Workflow run returned failure with no step details; logs returned BlobNotFound. Stop repeated unproductive retries unless new runner evidence appears.
+3. **Broadcast ingest:** Real JPEG confidence snapshots now reach authenticated server and remote Director surface *by implementation*, but this is low-rate preview only. No complete synchronized high-rate multi-camera recording/Blackbox video. Domain recording guard explicitly refuses 2.5D virtual confidence sources.
+4. **Cross-browser audio:** Existing program audio bus state shared; actual media from a different browser is not mixed into the originating browser's video recorder. Needs separate transport/test.
+5. **Runtime/performance:** No full browser/phone trial yet, no actual MediaRecorder persisted WebM playback, no GLB offscreen renderer stress measurements.
+6. **Camera registration lifetime:** Genre sources may remain registered after studio closes; do not unregister other operators' active cameras without ownership arbitration.
+7. **Owner artwork:** Pending, *nonblocking*. Keep placeholders and final switcher layout replaceable.
