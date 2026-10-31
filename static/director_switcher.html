@@ -701,6 +701,7 @@ let program = "cam1";
 let preview = "cam3";
 let recording = false;
 let paused = false;
+let directorBlackout = false, directorPreviewBars = false;
 let fadeInProgress = false;
 let activeRecordingSessionId = "";
 let clockStart = performance.now();
@@ -1038,8 +1039,8 @@ async function toggleRecord(btn) {
   }
   btn.classList.toggle("live", recording);
   setTruthCard("truthExport", recording ? "bad" : "warn", recording ? "Locked" : "Check", exportDetail());
-  log(recording ? "local recording state armed" : "local recording state stopped");
-  toast(recording ? "REC LOCAL" : "REC STOPPED");
+  log(recording ? "backend recording confirmed" : "recording stop outcome checked");
+  toast(recording ? "REC CONFIRMED" : "REC STOPPED");
 }
 
 async function pauseRecording(btn) {
@@ -1049,53 +1050,61 @@ async function pauseRecording(btn) {
     toast("NO REC");
     return;
   }
-  paused = !paused;
-  const result = activeRecordingSessionId ? await postJSON(`/api/recording/${encodeURIComponent(activeRecordingSessionId)}/pause`, {paused}) : null;
-  btn.classList.toggle("active-preview", paused);
-  setTruthCard("truthRecording", paused ? "warn" : "bad", paused ? "Paused" : "Local REC", result ? `Backend pause=${paused}` : `Local pause=${paused}; backend unavailable`);
-  log(paused ? "recording paused" : "recording resumed");
-  toast(paused ? "PAUSED" : "RESUMED");
+  if(!activeRecordingSessionId){toast("NO BACKEND REC");return;}
+  const desired=!paused;
+  const result=await postJSON(`/api/recording/${encodeURIComponent(activeRecordingSessionId)}/pause`,{paused:desired});
+  if(!result){toast("PAUSE FAILED");return;}
+  paused=desired;
+  btn.classList.toggle("active-preview",paused);
+  setTruthCard("truthRecording",paused?"warn":"bad",paused?"Backend Paused":"Backend REC",
+    `Backend confirmed pause=${paused}`);
+  log(paused?"backend recording paused":"backend recording resumed");
+  toast(paused?"PAUSED":"RESUMED");
 }
 
 async function marker() {
-  if (activeRecordingSessionId) {
-    await postJSON(`/api/recording/${encodeURIComponent(activeRecordingSessionId)}/marker`, {label: "Director marker", operator: "director"});
-  } else {
-    log("marker local only: no backend recording session confirmed");
+  if(!activeRecordingSessionId){log("Marker denied: no confirmed backend recording");toast("NO REC");return;}
+  const result=await postJSON(`/api/recording/${encodeURIComponent(activeRecordingSessionId)}/marker`,
+    {label:"Director marker",operator:"director"});
+  if(!result){toast("MARK FAILED");return;}
+  log("Director recording marker acknowledged");
+  toast("MARK SAVED");
+}
+
+async function panic() {
+  // Do not update the local video source or claim recording stopped until
+  // the backend has actually attempted the stop, black cue, and audio mute.
+  const result=await postJSON("/api/production/panic",{});
+  if(!result){setTruthCard("truthRecording","bad","PANIC FAILED","Backend not reached");toast("PANIC FAILED");return;}
+  if(activeRecordingSessionId&&result.sessions_stopped?.includes(activeRecordingSessionId)){
+    recording=false;paused=false;$("recordBtn").classList.remove("live");
   }
-  log("manual marker added");
-  toast("MARK");
-}
-
-function panic() {
-  preview = "cam1";
-  program = "cam1";
-  recording = false;
-  paused = false;
-  updateMonitors();
-  $("recordBtn").classList.remove("live");
-  postJSON("/api/production/panic", {});
-  postJSON("/api/state/production", {action: "panic", camera: cameraById(program).sourceId});
-  setTruthCard("truthRecording", "warn", "Idle", "Panic reset requested; recording stopped locally");
+  directorBlackout=!!result.blackout_cued;
+  setTruthCard("truthRecording",result.ok?"warn":"bad",result.ok?"PANIC SENT":"PANIC PARTIAL",
+    `${result.sessions_stopped?.length||0} sessions stopped; ${result.capture_errors?.length||0} capture errors; audio mute ${result.audio_muted?"confirmed":"unverified"}`);
+  log("Emergency backend response: "+JSON.stringify(result));
   renderDangerPanel();
-  log("panic reset to camera 1");
-  toast("PANIC RESET");
+  toast(result.ok?"PANIC SENT":"PANIC PARTIAL");
 }
 
-function bars() {
-  $("previewMode").textContent = $("previewMode").textContent === "BARS" ? "Ready" : "BARS";
-  log("preview bars toggled");
-  toast("BARS");
+async function bars() {
+  const desired=!directorPreviewBars;
+  const result=await postJSON("/api/production/video-cue",{cue:"preview_bars",enabled:desired});
+  if(!result?.ok){log("Preview bars command failed; no local-only success state");toast("BARS FAILED");return;}
+  directorPreviewBars=desired;$("previewMode").textContent=desired?"BARS":"Ready";
+  log("Preview bars confirmed by backend: "+desired);
+  toast(desired?"BARS ON":"BARS OFF");
 }
 
-function preset(name, btn) {
+async function preset(name,btn) {
   clickFlash(btn);
-  const map = {show_open: "cam1", interview: "cam2", closeup: "cam3", wrap: "cam5"};
-  preview = map[name] || preview;
-  updateMonitors();
-  postJSON("/api/timeline/load", {name});
-  log("preset armed: " + name.replace("_", " "));
-  toast("PRESET " + name.replace("_", " ").toUpperCase());
+  const result=await postJSON("/api/timeline/load",{name});
+  if(!result?.loaded){log("Preset did not load: "+name);toast("PRESET FAILED");return;}
+  const map={show_open:"cam1",interview:"cam2",closeup:"cam3",wrap:"cam5"};
+  const camera=cameras.find(c=>c.id===map[name]);
+  if(camera){if(!await setPreview(camera.id))return;}
+  log("Timeline preset loaded: "+result.loaded);
+  toast("PRESET LOADED");
 }
 
 async function exportRecording(btn) {
@@ -1212,7 +1221,14 @@ function init() {
   $("exportBtn").onclick = (ev) => exportRecording(ev.currentTarget);
   $("panicBtn").onclick = (ev) => { clickFlash(ev.currentTarget); panic(); };
   $("barsBtn").onclick = (ev) => { clickFlash(ev.currentTarget); bars(); };
-  $("blackoutBtn").onclick = () => { program = "cam5"; preview = "cam1"; updateMonitors(); toast("BLACKOUT CUE"); log("blackout cue armed"); };
+  $("blackoutBtn").onclick = async ()=>{
+    const desired=!directorBlackout;
+    const result=await postJSON("/api/production/video-cue",{cue:"blackout",enabled:desired});
+    if(!result?.ok){toast("BLACKOUT FAILED");log("Blackout command not acknowledged");return;}
+    directorBlackout=desired;
+    log("Server blackout "+(desired?"ON":"OFF"));
+    toast(desired?"BLACKOUT ON":"BLACKOUT OFF");
+  };
   document.querySelectorAll("[data-preset]").forEach(btn => btn.onclick = () => preset(btn.dataset.preset, btn));
   $("dangerPanelBtn").onclick = () => { renderDangerPanel(); togglePanel("dangerPanel"); };
   $("publicChatBtn").onclick = () => togglePanel("publicChatPanel");
@@ -1222,15 +1238,12 @@ function init() {
   document.querySelectorAll("[data-close]").forEach(btn => btn.onclick = () => togglePanel(btn.dataset.close, false));
   $("publicChatForm").onsubmit = (ev) => { ev.preventDefault(); sendLocalChat("public", "publicChatInput", "publicChatLog"); };
   $("controlChatForm").onsubmit = (ev) => { ev.preventDefault(); sendLocalChat("control", "controlChatInput", "controlChatLog"); };
-  document.querySelectorAll(".knob").forEach((knob, i) => {
-    let turn = i * 24;
-    knob.style.setProperty("--turn", turn + "deg");
-    knob.onclick = () => {
-      turn = (turn + 38) % 270;
-      knob.style.setProperty("--turn", turn + "deg");
-      log(knob.dataset.knob + " knob adjusted");
-      toast(knob.dataset.knob.toUpperCase());
-    };
+  // Undefined decorative effect controls must not pretend to change audio.
+  // Keep their visual positions for the owner's final hardware reference.
+  document.querySelectorAll(".knob").forEach(knob=>{
+    knob.disabled=true;
+    knob.title=knob.dataset.knob+" effect mapping awaits owner's Control Room specification";
+    knob.setAttribute("aria-label",knob.dataset.knob+" not wired — requires approved effect mapping");
   });
   document.addEventListener("keydown", (ev) => {
     if (/^[1-5]$/.test(ev.key)) setPreview("cam" + ev.key);
