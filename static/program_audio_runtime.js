@@ -94,6 +94,17 @@
       return bus;
     }
 
+    syncStatus(snapshot) {
+      if (!snapshot || typeof snapshot !== "object") throw Error("Invalid shared audio snapshot");
+      if (snapshot.master_volume != null) this.setMasterVolume(snapshot.master_volume);
+      for (const [bus, config] of Object.entries(snapshot.buses || {})) {
+        if (!BUS_NAMES.includes(bus) || !config || typeof config !== "object") continue;
+        if (config.volume != null) this.setBusVolume(bus, config.volume);
+        this.setMuted(bus, !!config.muted);
+      }
+      return this.status();
+    }
+
     setMasterVolume(volume) {
       this.masterVolume = clamp(volume, 0, 1, 1);
       this.ensureContext();
@@ -282,6 +293,7 @@
         const result = await response.json();
         cursor = result.sequence;
         if (result.gap) {runtime.stopAll(); runtime.lastError = 'Audio command gap; stale playback stopped';}
+        if (result.status) runtime.syncStatus(result.status);
         for (const event of result.events) {
           try {await runtime.consume(event);} catch (error) {runtime.lastError = error.message;}
         }
