@@ -13,20 +13,43 @@
   if (!cutBtn && !fadeBtn && !list) return;                          // this page has no vision mixer
 
   let state = { program: null, preview: null, sources: [] }, busy = false;
-  const post = (path, body) => fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-
+  function feedback(message, failed = false) {
+    if (!cutBtn && !fadeBtn) return;
+    let out = $("switcher-feedback");
+    if (!out) {
+      out = doc.createElement("output"); out.id = "switcher-feedback"; out.setAttribute("role","status");
+      out.style.cssText = "display:block;margin:8px 0;font-size:12px;max-width:100%";
+      (fadeBtn || cutBtn).insertAdjacentElement("afterend",out);
+    }
+    out.textContent = message;
+    out.style.color = failed ? "#ff7777" : "#8eddac";
+  }
+  const post = async (path, body) => {
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    if (!response.ok) throw Error(path+" HTTP "+response.status);
+    const data = await response.json();
+    if (!data || !("program" in data) || !("preview" in data)) throw Error("Switcher confirmation invalid");
+    return data;
+  };
   async function refresh() {
     try {
       const r = await fetch("/api/switcher/state", { cache: "no-store" });
-      if (!r.ok) return;
+      if (!r.ok) throw Error("HTTP "+r.status);
       const j = await r.json();
-      state = { program: j.program || null, preview: j.preview || null, sources: Array.isArray(j.sources) ? j.sources : [] };
+      if (!Array.isArray(j.sources)) throw Error("Invalid source list");
+      state = { program: j.program || null, preview: j.preview || null, sources: j.sources };
       render();
-    } catch (e) { /* the host is not there; the buttons stay as they are */ }
+    } catch (e) { feedback("Shared switcher unavailable: "+e.message, true); }
   }
   async function act(fn) {
     if (busy) return; busy = true;
-    try { await fn(); } catch (e) { /* the next refresh shows what happened */ } finally { busy = false; await refresh(); }
+    try {
+      const result = await fn();
+      if (!result) throw Error("No preview camera selected");
+      feedback("Program "+(result.program||"—")+" / Preview "+(result.preview||"—"));
+      await refresh();
+    } catch (e) { feedback("Switch failed: "+e.message, true); }
+    finally { busy = false; }
   }
   const setPreview = id => act(() => post("/api/switcher/preview/" + encodeURIComponent(id)));
   const setProgram = id => act(() => post("/api/switcher/cut/" + encodeURIComponent(id)));
