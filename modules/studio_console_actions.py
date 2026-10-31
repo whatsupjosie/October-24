@@ -95,13 +95,11 @@ def execute_studio_action(
             raise ValueError(f"Camera source '{source_id}' not found")
         result = {"ok": True, "target": "program" if action_id.endswith("program") else "preview", "source_id": source_id}
     elif action_id == "camera.cut":
+        if not cameras.take():
+            raise ValueError("Both program and preview must be set before cut")
         program = cameras.get_program_source()
         preview = cameras.get_preview_source()
-        if program is None or preview is None:
-            raise ValueError("Both program and preview must be set before cut")
-        cameras.set_program_source(preview.source_id)
-        cameras.set_preview_source(program.source_id)
-        result = {"ok": True, "program": preview.source_id, "preview": program.source_id}
+        result = {"ok": True, "program": program.source_id, "preview": preview.source_id}
     elif action_id == "recording.preflight":
         sources = body.get("sources") if isinstance(body.get("sources"), list) else []
         result = recording_preflight(
