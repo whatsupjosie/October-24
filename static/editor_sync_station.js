@@ -5,12 +5,14 @@
  */
 (function(){
 "use strict";
-const Core=window.PubCastEditorSync, Store=window.PubCastEditorSyncStore;
+const Core=window.PubCastEditorSync, Store=window.PubCastEditorSyncStore, Interchange=window.PubCastEditorInterchange;
 const $=id=>document.getElementById(id);
 if(!Core||!Store||!$("station-editor"))return;
 const ui={
  title:$("ed-project-title"),projects:$("ed-projects"),newProject:$("ed-new-project"),
- save:$("ed-save"),export:$("ed-export"),import:$("ed-import"),cache:$("ed-cache"),
+ save:$("ed-save"),export:$("ed-export"),edlExport:$("ed-edl-export"),
+ frameRate:$("ed-frame-rate"),sourceExport:$("ed-original"),
+ import:$("ed-import"),cache:$("ed-cache"),
  sidecar:$("ed-sidecar"),bin:$("ed-bin"),video:$("ed-view"),audio:$("ed-audio"),
  playhead:$("ed-playhead"),markIn:$("ed-mark-in"),markOut:$("ed-mark-out"),add:$("ed-add-subclip"),
  io:$("ed-io"),timeline:$("ed-timeline"),status:$("ed-status"),selected:$("ed-selected-track"),
@@ -35,6 +37,11 @@ const timeText=us=>{const ms=Math.round(Math.max(0,us)/1000),h=Math.floor(ms/360
  return [h,m,s].map(n=>String(n).padStart(2,"0")).join(":")+"."+String(ms%1000).padStart(3,"0")};
 const clone=x=>JSON.parse(JSON.stringify(x));
 const filenameSafe=s=>String(s).replace(/[^a-zA-Z0-9._-]+/g,"-").slice(0,90)||"pubcast-shoot";
+function downloadBlob(blob,name){
+ const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;
+ document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+}
+function chosenFPS(){if(!Interchange)throw Error("Interchange adapter unavailable");return Interchange.validFrameRate(Number(ui.frameRate.value))}
 function stopPreview(){
  selectionToken++;for(const media of [ui.video,ui.audio]){media.pause();media.removeAttribute("src");media.load();media.hidden=true;}
 }
@@ -173,7 +180,7 @@ async function openProject(id){
  if(project&&project.revision!==lastSaved)await save();
  const result=await Store.readProject(id);if(!result)throw Error("Shoot project missing");
  Core.validateProject(result);releaseURLs();project=result;projectEpoch++;lastSaved=result.revision;
- currentTrackId=null;activeClipId=null;markInUs=null;markOutUs=null;playheadUs=0;ui.title.value=result.title;
+ currentTrackId=null;activeClipId=null;markInUs=null;markOutUs=null;playheadUs=0;ui.title.value=result.title;ui.frameRate.value=String(result.frameRate||24);
  renderBin();renderTimeline();renderSelected();renderIO();say("Opened "+result.title+"; relink un-cached files as needed");
 }
 async function refreshProjects(){
@@ -185,6 +192,7 @@ async function createShoot(){
  if(project&&project.revision!==lastSaved)await save();
  releaseURLs();project=Core.createProject(ui.title.value||"Untitled shoot",Date.now(),"edit-"+Date.now()+"-"+Math.random().toString(36).slice(2,8));
  projectEpoch++;lastSaved=-1;currentTrackId=null;activeClipId=null;playheadUs=0;markInUs=null;markOutUs=null;
+ project.frameRate=chosenFPS();
  ui.title.value=project.title;renderBin();renderSelected();renderTimeline();renderIO();
  await save();await refreshProjects();
 }
@@ -235,16 +243,28 @@ async function noteClacker(){
  project=staged;await updated();say("Clacker #"+sequence+" marked at "+timeText(sourceUs));
 }
 function exportPlan(){
- ensure();Core.validateProject(project);
- const obj={format:"PubCast Rough-Cut Transfer",version:1,
-   purpose:"Portable non-destructive sync, coverage selections and relink metadata; NOT a native Resolve project",
-   project:clone(project),renderSelection:Core.exportManifest(project),
-   integration:{preferredFinisher:"DaVinci Resolve",transferStatus:"interchange adapter required",
-     note:"All timing is integer microseconds, clacker reference every 15 seconds; media files must be relinked by the finisher."}};
- const blob=new Blob([JSON.stringify(obj,null,2)],{type:"application/json"});
- const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filenameSafe(project.title)+".pubcast-edit.json";
- document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
- say("Exported edit-plan JSON. Resolve-specific interchange requires a validated adapter.");
+ ensure();if(!Interchange)throw Error("Professional interchange adapter unavailable");
+ const frameRate=chosenFPS(),audit=Interchange.audit(project,Core);
+ const obj={...Interchange.packageManifest(project,Core,{frameRate}),project:clone(project)};
+ downloadBlob(new Blob([JSON.stringify(obj,null,2)],{type:"application/json"}),
+   filenameSafe(project.title)+".pubcast-handoff.json");
+ say("Handoff saved. "+audit.problems.length+" source problems, "+audit.warnings.length+
+   " checks pending. Transfer originals separately; no media is embedded in this manifest.");
+}
+function exportEDL(){
+ ensure();if(!Interchange)throw Error("CMX3600 interchange adapter unavailable");
+ const edl=Interchange.toEDL(project,Core,chosenFPS());
+ downloadBlob(new Blob([edl.edl],{type:"text/plain;charset=utf-8"}),
+   filenameSafe(project.title)+".edl");
+ say("Simple CMX3600 cuts EDL at "+edl.rate+" fps saved. "+
+   "Keep the JSON handoff for microsecond clacker offsets, drift and audio.");
+}
+async function exportSource(){
+ const t=selected(),blob=await resolveMedia(t);
+ if(!blob||!blob.size)throw Error("The selected media isn't available here. Relink the source first.");
+ const name=filenameSafe(t.label);
+ downloadBlob(blob,name);
+ say("Saved "+name+" as stored bytes—no transcode or upscale. Source quality is not certified.");
 }
 function changePlayhead(us){playheadUs=Math.max(0,us);if(currentTrackId)selectTrack(currentTrackId).catch(fail);ui.playhead.textContent="Shoot time: "+timeText(playheadUs)}
 ui.newProject.addEventListener("click",()=>safe(createShoot));
@@ -267,13 +287,26 @@ ui.add.addEventListener("click",()=>safe(async()=>{
  await updated();say("Selected coverage added — original take untouched");
 }));
 ui.export.addEventListener("click",()=>safe(exportPlan));
+ui.edlExport.addEventListener("click",()=>safe(exportEDL));
+ui.sourceExport.addEventListener("click",()=>safe(exportSource));
+ui.frameRate.addEventListener("change",()=>safe(async()=>{
+ ensure();project.frameRate=chosenFPS();project.revision++;project.updatedAt=new Date().toISOString();
+ await save();
+}));
 ui.play.addEventListener("click",()=>safe(async()=>{
  const media=currentMedia();if(!media.currentSrc)throw Error("No proxy to play");
  if(media.paused){await media.play();ui.play.textContent="⏸"}else{media.pause();ui.play.textContent="▶"}
 }));
-ui.stop.addEventListener("click",()=>safe(()=>{const media=currentMedia();media.pause();ui.play.textContent="▶";}));
-ui.back.addEventListener("click",()=>safe(()=>seekPlayhead(-1/30)));
-ui.forward.addEventListener("click",()=>safe(()=>seekPlayhead(1/30)));
+ui.stop.addEventListener("click",()=>safe(()=>{const media=currentMedia();media.pause();
+ const shot=project?.selections.find(e=>e.id===activeClipId);
+ if(shot&&shot.kind!=="gap"&&shot.trackId===currentTrackId){
+   const us=Core.sourceTimeUs(project,shot.trackId,shot.inUs);
+   media.currentTime=Math.max(0,us/1000000);
+ }
+ ui.play.textContent="▶";
+}));
+ui.back.addEventListener("click",()=>safe(()=>seekPlayhead(-1/chosenFPS())));
+ui.forward.addEventListener("click",()=>safe(()=>seekPlayhead(1/chosenFPS())));
 ui.prev.addEventListener("click",()=>safe(()=>navigateShot(-1)));
 ui.next.addEventListener("click",()=>safe(()=>navigateShot(1)));
 ui.split.addEventListener("click",()=>safe(splitCurrent));
