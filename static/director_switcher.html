@@ -680,6 +680,7 @@ button.switch.active-program {
 <div class="status-toast" id="toast">READY</div>
 
 <script src="/static/studio_console_hotspots.js"></script>
+<script src="/static/studio25d_remote_feed.js"></script>
 <script>
 const cameras = [
   {id: "cam1", sourceId: "wide_shot", label: "Camera 1", shot: "Wide"},
@@ -719,6 +720,23 @@ let backendTruth = {
 
 const $ = (id) => document.getElementById(id);
 const cameraById = (id) => cameras.find(c => c.id === id) || cameras[0];
+// Real media is deliberately separate from canonical Program/Preview state.
+function createRemoteViewer(){
+  if(!window.PubCast25DRemoteFeed)return null;
+  const targets={};
+  for(const [role,monitor,readout] of [
+    ["program","programMonitor","programSource"],["preview","previewMonitor","previewSource"]]){
+    const holder=$(monitor)?.querySelector(".feed");
+    if(!holder)continue;
+    holder.style.position="relative";
+    const img=document.createElement("img");img.alt="Real 2.5D "+role+" confidence video";img.hidden=true;
+    img.style.cssText="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1";
+    holder.append(img);
+    targets[role]={image:img,status:$(readout)};
+  }
+  return window.PubCast25DRemoteFeed.create({targets});
+}
+const remoteViewer=createRemoteViewer();
 const studioActions = window.PubCastStudioConsoleHotspots
   ? new window.PubCastStudioConsoleHotspots.StudioConsoleHotspots()
   : null;
@@ -936,6 +954,7 @@ function syncVideoSwitcherState(snapshot){
   program=cameras.find(c=>c.sourceId===snapshot.program)?.id||program;
   preview=cameras.find(c=>c.sourceId===snapshot.preview)?.id||preview;
   backendTruth.switcher=snapshot;
+  remoteViewer?.setSources(snapshot.program,snapshot.preview);
   updateMonitors();
   renderAux("auxLeft",0);renderAux("auxRight",2);
   return true;
@@ -1225,6 +1244,8 @@ function init() {
   refreshTruth();
   setInterval(refreshTruth, 10000);
   setInterval(refreshSwitcherState, 1000);
+  setInterval(()=>remoteViewer?.refresh().catch(e=>log("Confidence preview: "+e.message)),350);
+  window.addEventListener("pagehide",()=>remoteViewer?.stop());
   tick();
 }
 init();
