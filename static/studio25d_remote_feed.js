@@ -15,7 +15,11 @@
    const urlAPI=options.urlAPI||(typeof URL!=="undefined"?URL:null);
    const targets=options.targets||{};
    if(!fetcher||!urlAPI)throw Error("Remote confidence preview requires Fetch and URL");
-   const entries={program:{source:null,url:null,busy:false,generation:0},preview:{source:null,url:null,busy:false,generation:0}};
+   const entries={program:{source:null,url:null,busy:false,generation:0,lastFresh:0,controller:null},
+                  preview:{source:null,url:null,busy:false,generation:0,lastFresh:0,controller:null}};
+   const now=options.now||Date.now;
+   const schedule=options.setTimeout||globalThis.setTimeout?.bind(globalThis);
+   const cancel=options.clearTimeout||globalThis.clearTimeout?.bind(globalThis);
    let stopped=false;
    function setStatus(role,label,visible=false) {
      const target=targets[role];if(!target?.status)return;
@@ -33,7 +37,8 @@
      for(const [role,source] of [["program",program],["preview",preview]]){
        const entry=entries[role];
        if(entry.source===source)continue;
-       entry.source=source||null;entry.generation++;
+       entry.controller?.abort();
+       entry.source=source||null;entry.generation++;entry.lastFresh=0;
        clear(role,sourcePattern.test(source||"")?"AWAITING REAL 2.5D FRAME":"VIDEO FEED UNBOUND");
      }
    }
@@ -41,9 +46,13 @@
      const entry=entries[role],source=entry.source,target=targets[role];
      if(stopped||entry.busy||!target?.image||!sourcePattern.test(source||""))return false;
      entry.busy=true;const gen=entry.generation;
+     const controller=typeof AbortController==="function"?new AbortController():null;
+     entry.controller=controller;
+     const timer=controller&&schedule?schedule(()=>controller.abort(),2000):null;
      try{
        const response=await fetcher("/api/studio25d/media/frames/"+encodeURIComponent(source),{
-         cache:"no-store",credentials:"same-origin"
+         cache:"no-store",credentials:"same-origin",
+         signal:controller?.signal
        });
        if(!response.ok)throw Error("HTTP "+response.status);
        if(!String(response.headers?.get?.("content-type")||"").startsWith("image/jpeg"))
@@ -71,20 +80,30 @@
        if(stopped||gen!==entry.generation||entry.source!==source)return false;
        const newURL=urlAPI.createObjectURL(blob),old=entry.url;
        entry.url=newURL;target.image.src=newURL;target.image.hidden=false;
+       entry.lastFresh=now();
        if(old)urlAPI.revokeObjectURL(old);
        setStatus(role,"REAL 2.5D FRAME · "+Math.round(age)+"ms OLD · LOW-RATE CONFIDENCE",true);
        return true;
      }catch(e){
        if(gen===entry.generation&&!stopped)clear(role,"NO FRESH VIDEO FRAME ("+e.message+")");
        return false;
-     }finally{entry.busy=false;}
+     }finally{
+       if(timer!==null&&cancel)cancel(timer);
+       if(entry.controller===controller)entry.controller=null;
+       entry.busy=false;
+     }
    }
    async function refresh(){
      if(stopped)return;
+     for(const role of ["program","preview"]){
+       const e=entries[role];
+       if(e.url&&now()-e.lastFresh>5000)clear(role,"VIDEO FRAME STALE — STREAM LOST");
+     }
      await Promise.all([update("program"),update("preview")]);
    }
    function stop(){
      if(stopped)return;stopped=true;
+     entries.program.controller?.abort();entries.preview.controller?.abort();
      clear("program");clear("preview");
    }
    return {setSources,refresh,stop,status:()=>({stopped,program:entries.program.source,preview:entries.preview.source})};
