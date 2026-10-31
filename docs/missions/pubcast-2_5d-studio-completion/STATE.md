@@ -26,3 +26,10 @@ Branch: `pubcast-25d-production-integration-2026-10-30` (separate from working B
 6. Run objective observation, correction rounds, and full owner handoff.
 
 Always continue after a milestone if actionable work remains.
+
+## Additional integration work
+- Added two Node test suites: `tests/test_production25d_core.cjs` and `tests/test_production25d_wiring.cjs` (written but NOT EXECUTED).
+- Linked the established `static/control_room.html` navigation to the new 2.5D studio, preserving the existing controls.
+- Added `LAUNCH_AND_ASSETS.md` with reproducible local launch, genre verification, asset replacement and recording checks.
+- Examined `static/control_switcher.js` (server `/api/switcher/*`), `static/control_stations.js` (recording, chyron, teleprompter, VTR, audio), `static/camera_rig.js` and `static/control_room.html`. Full integration remains outstanding. Existing audio station has console-only mixer behavior and must not be called wired.
+- Attempted local GitHub access with `git ls-remote`; failed due container DNS (`Could not resolve host: github.com`). This prevents cloning for local execution via that path. Continue independent source integration and consider other verified test execution routes.
