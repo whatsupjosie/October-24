@@ -23,11 +23,16 @@ jobs:
           node --check static/studio25d_remote_feed.js
           node --check static/production25d_app.js
           node --check static/control_stations.js
+          node --check static/switcher.js
+          node --check static/editor_sync_core.js
+          node --check static/editor_sync_store.js
+          node --check static/editor_sync_station.js
+          node --check static/editor_interchange.js
           node --check static/control_switcher.js
           node --check static/program_audio_runtime.js
       - name: Run dependency-free studio tests
         run: |
-          node --test tests/test_production25d_core.cjs tests/test_production25d_wiring.cjs tests/test_production25d_switcher_bridge.cjs tests/test_studio25d_confidence.cjs
+          node --test tests/test_production25d_core.cjs tests/test_production25d_wiring.cjs tests/test_production25d_switcher_bridge.cjs tests/test_studio25d_confidence.cjs tests/test_editor_sync_interchange.cjs
   python-syntax:
     runs-on: ubuntu-latest
     steps:
