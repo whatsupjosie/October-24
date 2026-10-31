@@ -29,7 +29,7 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 <header><strong>PubCast / 2.5D Television Studio</strong>
 <span class="pill" id="mode">LOCAL PRODUCTION</span><span class="pill" id="switcherLink" aria-live="polite">VIDEO: LOCAL ONLY</span><span id="state" role="status" aria-live="polite">Initializing</span>
 <span id="timecode">00:00:00</span><a href="./world_walk.html">Walkable studio</a>
-<a href="./control_room.html">Existing Control Room</a><a href="./control.html">Shared audio / video mixer</a>
+<a href="./control_room.html">Existing Control Room</a><a href="/control">Shared audio / video mixer</a>
 </header>
 <main>
 <div>
@@ -85,6 +85,7 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 <section style="margin-top:12px"><h2>PRODUCTION EVENT LOG</h2><div id="events" aria-live="polite"></div></section>
 </aside>
 </main>
+<script src="./reach_auth.js"></script>
 <script src="./production25d_core.js"></script>
 <script src="./production25d_renderer.js"></script>
 <script src="./production25d_storage.js"></script>
