@@ -17,9 +17,13 @@ const ui={
  offset:$("ed-offset"),apply:$("ed-apply-offset"),reset:$("ed-reset-offset"),
  marker:$("ed-marker-number"),markClacker:$("ed-mark-clacker"),health:$("ed-sync-health"),
  menu:$("ed-sync-menu"),advance:$("ed-advance-30"),delay:$("ed-delay-30"),
- resetMenu:$("ed-reset-menu"),closeMenu:$("ed-close-sync")
+ resetMenu:$("ed-reset-menu"),closeMenu:$("ed-close-sync"),
+ prev:$("ed-prev"),back:$("ed-back"),stop:$("ed-stop"),play:$("ed-play"),
+ forward:$("ed-forward"),next:$("ed-next"),split:$("ed-split"),lift:$("ed-lift"),
+ ripple:$("ed-ripple"),closeGaps:$("ed-close-gaps"),addGap:$("ed-add-gap"),
+ activeClip:$("ed-active-clip")
 };
-let project=null,currentTrackId=null,playheadUs=0,markInUs=null,markOutUs=null,selectionToken=0;
+let project=null,currentTrackId=null,activeClipId=null,playheadUs=0,markInUs=null,markOutUs=null,selectionToken=0;
 let saveQueue=Promise.resolve(),lastSaved=-1,projectEpoch=0;
 const fileByTrack=new Map(),objectURLByTrack=new Map();
 const fail=err=>{const msg=String(err?.message||err);ui.status.textContent=msg;ui.status.style.color="#ff8585";console.error("PubCast assembly",err)};
@@ -113,24 +117,63 @@ function renderSelected(){
 }
 function renderTimeline(){
  ui.timeline.replaceChildren();if(!project)return;
- if(!project.selections.length){ui.timeline.textContent="No selected shots yet";return}
- for(const s of project.selections){
-   const row=document.createElement("div");row.style.cssText="display:flex;gap:8px;padding:6px;align-items:center;border-bottom:1px solid #8885";
-   const track=project.tracks.find(t=>t.id===s.trackId);
-   const label=document.createElement("span");label.style.flex="1";label.textContent=(track?.label||s.trackId)+" · "+timeText(s.inUs)+" – "+timeText(s.outUs);
-   const open=document.createElement("button");open.type="button";open.textContent="Review";
-   open.addEventListener("click",()=>safe(async()=>{playheadUs=s.inUs;await selectTrack(s.trackId)}));
-   const remove=document.createElement("button");remove.type="button";remove.textContent="Remove";remove.title="Remove select, not original footage";
-   remove.addEventListener("click",()=>safe(async()=>{project.selections=project.selections.filter(x=>x.id!==s.id);project.revision++;project.updatedAt=new Date().toISOString();await updated()}));
-   row.append(label,open,remove);ui.timeline.append(row);
+ const entries=Core.timelineEntries(project);
+ if(!entries.length){ui.timeline.textContent="No selected shots yet";return}
+ for(const e of entries){
+   const row=document.createElement("div");row.style.cssText="display:flex;gap:6px;padding:6px;align-items:center;border-bottom:1px solid #8885";
+   if(activeClipId===e.id)row.style.background="rgba(170,180,255,.17)";
+   const track=project.tracks.find(t=>t.id===e.trackId);
+   const label=document.createElement("span");label.style.flex="1";
+   label.textContent=(e.kind==="gap"?"[BLANK] "+timeText(e.durationUs):(track?.label||e.trackId)+" · "+timeText(e.inUs)+" – "+timeText(e.outUs))
+      +"  · assembly "+timeText(e.timelineInUs);
+   const choose=document.createElement("button");choose.type="button";choose.textContent="Select";
+   choose.addEventListener("click",()=>safe(async()=>{
+     activeClipId=e.id;
+     if(e.kind!=="gap"){playheadUs=e.inUs;await selectTrack(e.trackId)}
+     renderTimeline();ui.activeClip.textContent=e.kind==="gap"?"Selected blank":("Selected "+(track?.label||e.trackId));
+   }));
+   const up=document.createElement("button");up.type="button";up.textContent="↑";up.title="Earlier in rough cut";
+   up.addEventListener("click",()=>safe(async()=>{Core.moveSelection(project,e.id,-1);await updated()}));
+   const down=document.createElement("button");down.type="button";down.textContent="↓";down.title="Later in rough cut";
+   down.addEventListener("click",()=>safe(async()=>{Core.moveSelection(project,e.id,1);await updated()}));
+   row.append(label,choose,up,down);ui.timeline.append(row);
  }
 }
 function renderIO(){ui.io.textContent="In: "+(markInUs==null?"—":timeText(markInUs))+"  Out: "+(markOutUs==null?"—":timeText(markOutUs))}
+function activeEntry(){ensure();const item=Core.timelineEntries(project).find(x=>x.id===activeClipId);
+ if(!item)throw Error("Select a rough-cut clip first");return item;}
+function seekPlayhead(secondsDelta){
+ const media=currentMedia();if(!media.currentSrc)throw Error("Load a camera/audio proxy first");
+ const sourceTime=Math.max(0,media.currentTime+secondsDelta);
+ media.currentTime=Number.isFinite(media.duration)&&media.duration>0?Math.min(media.duration,sourceTime):sourceTime;
+ updatePlayhead();
+}
+function navigateShot(direction){
+ const entries=Core.timelineEntries(ensure()).filter(x=>x.kind!=="gap");
+ if(!entries.length)throw Error("Rough cut is empty");
+ const index=entries.findIndex(x=>x.id===activeClipId),next=entries[Math.max(0,Math.min(entries.length-1,index+direction))];
+ if(!next)throw Error("No adjacent shot");
+ activeClipId=next.id;playheadUs=next.inUs;
+ ui.activeClip.textContent="Selected "+(project.tracks.find(t=>t.id===next.trackId)?.label||next.trackId);
+ return selectTrack(next.trackId).then(renderTimeline);
+}
+function splitCurrent(){
+ const e=activeEntry();if(e.kind==="gap")throw Error("Choose a shot, not blank space");
+ if(e.trackId!==currentTrackId)throw Error("Preview the selected shot before splitting");
+ const time=shootPosition();
+ const assemblyUs=e.timelineInUs+(time-e.inUs);
+ Core.splitAt(project,e.id,assemblyUs);
+ activeClipId=e.id;return updated();
+}
+function deleteCurrent(ripple){
+ const e=activeEntry();Core.deleteSelection(project,e.id,ripple);
+ activeClipId=null;ui.activeClip.textContent=ripple?"Ripple delete applied":"Lifted shot, retaining blank space";return updated();
+}
 async function openProject(id){
  if(project&&project.revision!==lastSaved)await save();
  const result=await Store.readProject(id);if(!result)throw Error("Shoot project missing");
  Core.validateProject(result);releaseURLs();project=result;projectEpoch++;lastSaved=result.revision;
- currentTrackId=null;markInUs=null;markOutUs=null;playheadUs=0;ui.title.value=result.title;
+ currentTrackId=null;activeClipId=null;markInUs=null;markOutUs=null;playheadUs=0;ui.title.value=result.title;
  renderBin();renderTimeline();renderSelected();renderIO();say("Opened "+result.title+"; relink un-cached files as needed");
 }
 async function refreshProjects(){
@@ -138,11 +181,12 @@ async function refreshProjects(){
  const placeholder=document.createElement("option");placeholder.value="";placeholder.textContent="Saved shoots…";ui.projects.append(placeholder);
  for(const item of projects){const option=document.createElement("option");option.value=item.id;option.textContent=item.title+" · "+new Date(item.updatedAt).toLocaleDateString();ui.projects.append(option)}
 }
-function createShoot(){
+async function createShoot(){
+ if(project&&project.revision!==lastSaved)await save();
  releaseURLs();project=Core.createProject(ui.title.value||"Untitled shoot",Date.now(),"edit-"+Date.now()+"-"+Math.random().toString(36).slice(2,8));
- projectEpoch++;lastSaved=-1;currentTrackId=null;playheadUs=0;markInUs=null;markOutUs=null;
+ projectEpoch++;lastSaved=-1;currentTrackId=null;activeClipId=null;playheadUs=0;markInUs=null;markOutUs=null;
  ui.title.value=project.title;renderBin();renderSelected();renderTimeline();renderIO();
- return save().then(refreshProjects);
+ await save();await refreshProjects();
 }
 async function importFiles(){
  ensure();const files=[...ui.import.files];if(!files.length)return;
@@ -182,8 +226,13 @@ function applyOffset(seconds){const t=selected();Core.setOffsetSeconds(project,t
 async function noteClacker(){
  const t=selected(),sequence=Number(ui.marker.value);
  if(!Number.isSafeInteger(sequence)||sequence<0)throw Error("Invalid 15-second clacker number");
- Core.addClackerMark(project,t.id,sequence,Math.round(Number(currentMedia().currentTime||0)*1000000));
- await updated();say("Clacker #"+sequence+" placed on "+t.label+" at source "+timeText(Math.round(currentMedia().currentTime*1000000)));
+ const media=currentMedia();
+ if(!media.currentSrc||media.readyState<1||!Number.isFinite(media.currentTime))
+   throw Error("Open and seek an actual proxy before setting a clacker anchor");
+ const sourceUs=Math.round(media.currentTime*1000000),staged=clone(project);
+ Core.addClackerMark(staged,t.id,sequence,sourceUs);
+ Core.alignment(staged,staged.tracks.find(x=>x.id===t.id)); // Validate drift before changing project.
+ project=staged;await updated();say("Clacker #"+sequence+" marked at "+timeText(sourceUs));
 }
 function exportPlan(){
  ensure();Core.validateProject(project);
@@ -218,6 +267,23 @@ ui.add.addEventListener("click",()=>safe(async()=>{
  await updated();say("Selected coverage added — original take untouched");
 }));
 ui.export.addEventListener("click",()=>safe(exportPlan));
+ui.play.addEventListener("click",()=>safe(async()=>{
+ const media=currentMedia();if(!media.currentSrc)throw Error("No proxy to play");
+ if(media.paused){await media.play();ui.play.textContent="⏸"}else{media.pause();ui.play.textContent="▶"}
+}));
+ui.stop.addEventListener("click",()=>safe(()=>{const media=currentMedia();media.pause();ui.play.textContent="▶";}));
+ui.back.addEventListener("click",()=>safe(()=>seekPlayhead(-1/30)));
+ui.forward.addEventListener("click",()=>safe(()=>seekPlayhead(1/30)));
+ui.prev.addEventListener("click",()=>safe(()=>navigateShot(-1)));
+ui.next.addEventListener("click",()=>safe(()=>navigateShot(1)));
+ui.split.addEventListener("click",()=>safe(splitCurrent));
+ui.lift.addEventListener("click",()=>safe(()=>deleteCurrent(false)));
+ui.ripple.addEventListener("click",()=>safe(()=>deleteCurrent(true)));
+ui.closeGaps.addEventListener("click",()=>safe(async()=>{const count=Core.closeGaps(ensure());
+ await updated();say(count+" blank spaces removed; sources unchanged")}));
+ui.addGap.addEventListener("click",()=>safe(async()=>{Core.gap(ensure(),1000000);
+ await updated();say("One-second blank inserted in rough cut")}));
+for(const media of [ui.video,ui.audio])media.addEventListener("pause",()=>ui.play.textContent="▶");
 for(const media of [ui.video,ui.audio]){
  media.addEventListener("timeupdate",updatePlayhead);
  media.addEventListener("seeked",updatePlayhead);
@@ -228,6 +294,10 @@ document.addEventListener("keydown",e=>{
  if(["INPUT","TEXTAREA","SELECT"].includes(e.target?.tagName)||e.target?.isContentEditable)return;
  if(e.key.toLowerCase()==="i"){e.preventDefault();ui.markIn.click()}
  if(e.key.toLowerCase()==="o"){e.preventDefault();ui.markOut.click()}
+ if(e.code==="Space"||e.key.toLowerCase()==="l"){e.preventDefault();ui.play.click()}
+ if(e.key.toLowerCase()==="k"){e.preventDefault();ui.stop.click()}
+ if(e.code==="ArrowLeft"){e.preventDefault();ui.back.click()}
+ if(e.code==="ArrowRight"){e.preventDefault();ui.forward.click()}
 });
 window.addEventListener("pagehide",releaseURLs);
 refreshProjects().then(()=>{renderBin();renderTimeline()}).catch(fail);
