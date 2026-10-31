@@ -10,6 +10,10 @@ function fakeServer() {
   requests.push({path,init});const body=init.body?JSON.parse(init.body):{};
   if(path==="/api/switcher/state")return {ok:true,json:async()=>result()};
   if(path==="/api/cameras/register"){sources.push({id:body.source_id,name:body.name});return {ok:true,json:async()=>({ok:true})};}
+  if(path==="/api/switcher/select"){
+    if(!sources.some(s=>s.id===body.program)||!sources.some(s=>s.id===body.preview))return {ok:false,status:404};
+    program=body.program;preview=body.preview;return {ok:true,json:async()=>result()};
+  }
   if(path.startsWith("/api/switcher/cut/")){program=decodeURIComponent(path.split("/").pop());return {ok:true,json:async()=>result()};}
   if(path.startsWith("/api/switcher/preview/")){preview=decodeURIComponent(path.split("/").pop());return {ok:true,json:async()=>result()};}
   if(path==="/api/switcher/cut"||path==="/api/switcher/transition"){
