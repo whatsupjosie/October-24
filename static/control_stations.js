@@ -16,6 +16,13 @@
     const panel = document.getElementById(`station-${target}`);
     if (panel) panel.classList.remove('hidden');
     btn.classList.add('active');
+    // This page shares keys with the studio switcher. Keep the switcher
+    // disarmed in the editor: SPACE must PLAY, never cut live Program.
+    const controlKeys = window.PubCastControlKeys?.km;
+    if (controlKeys) {
+      if (target === 'director') controlKeys.open('switcher');
+      else controlKeys.close();
+    }
     if (target === 'recorder') loadRecorderStation();
   });
   // Default to director on load
@@ -188,7 +195,8 @@ document.querySelector('[data-station="audio"]')?.addEventListener('click', () =
 // ── Keyboard shortcuts (Space/C = Cut, F = Fade) ──────────────────────────────
 // Pages that load the shared key map (static/control_keys.js) get their keys from it, so this fixed set steps aside there.
 if (!window.PubCastControlKeys) document.addEventListener('keydown', e => {
-  if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  if (document.getElementById('station-director')?.classList.contains('hidden')) return;
+  if (e.ctrlKey || e.altKey || e.metaKey || ['INPUT','TEXTAREA','SELECT'].includes(e.target?.tagName)) return;
   if (e.code==='Space'||e.key==='c'||e.key==='C') { e.preventDefault(); document.getElementById('vm-cut')?.click(); }
   if (e.key==='f'||e.key==='F') { e.preventDefault(); document.getElementById('vm-take')?.click(); }
 });
