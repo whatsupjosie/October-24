@@ -62,6 +62,7 @@ from modules.blackbox_runtime import BlackBoxRuntimeWitness, create_blackbox_wit
 from modules.blackbox_routes import create_blackbox_router
 from modules.production_routes import create_production_router
 from modules.program_audio import ProgramAudioState, apply_audio_event
+from modules.studio25d_media_routes import create_studio25d_media_router
 from modules.governance import GovernanceEngine
 from modules.governance_routes import create_governance_router
 from modules.host_control import create_host_control_router
@@ -1155,6 +1156,9 @@ async def lifespan(application: FastAPI):
     application.state.director_engine = director_engine
     application.state.switcher_service = switcher_service
     application.include_router(create_switcher_router(switcher_service))
+    # Browser-origin 2.5D camera pixels, shared with the SAME canonical switcher.
+    # Bounded authenticated confidence previews; not a claim of full WebRTC ingest.
+    application.include_router(create_studio25d_media_router(cameras))
     # Every program/preview change, from any route, reaches the stage pages.
     from modules.camera_broadcast import CameraBroadcastBridge
     camera_broadcast = CameraBroadcastBridge(cameras, hub)
