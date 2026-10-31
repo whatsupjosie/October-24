@@ -186,6 +186,13 @@ class RecordingService:
             camera = self.cameras.get(source_id)
             if not camera:
                 raise ValueError(f"Unknown source '{source_id}'")
+            # A JPEG confidence frame endpoint is not a recordable video transport.
+            # Guard the domain boundary across all recording entry points.
+            if "studio25d" in camera.tags and str(camera.endpoint).startswith("virtual://"):
+                raise ValueError(
+                    f"2.5D source '{source_id}' provides confidence images only; "
+                    "use the local full-resolution recorder until media ingest is connected"
+                )
             policy = self.room_policy(camera.location)
             rule = policy.get("recording", "allowed")
             if rule == "never" and not host_override:
