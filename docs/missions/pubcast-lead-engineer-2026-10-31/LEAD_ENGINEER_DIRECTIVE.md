@@ -76,8 +76,11 @@ Engineering must provide:
   stage spaces, change pose, and be consistently framed. Fixed camera positions
   are not permission to make performers stiff.
 - Camera presets/shot compositions and authentic Program/Preview across eight
-  current genre packages: news, debate, political discussion, talk, late night,
-  variety, game show and the eighth actual package (read the code for its name).
+  current genre packages identified in the code: `news`, `late_night`,
+  `debate`, `political_discussion`, `audience`, `game`,
+  `variety`, and `general`. The owner also expects useful talk/interview
+  layouts; verify those with existing packages or introduce a properly
+  specified package only if coverage is missing.
   Validate that EVERY package has defensible, differentiated coverage.
 - Sets inspired by broad television geometry/conventions (news desk, talk sofa,
   podium debate, political panel, theatrical variety, game show, audience-driven
