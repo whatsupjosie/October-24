@@ -628,6 +628,24 @@ def create_production_router(
     # PANIC / Emergency
     # —
 
+    @router.post("/api/production/video-cue")
+    async def video_cue(request: Request, identity: Dict[str, Any] = Depends(require_role("mod"))):
+        """Shared, acknowledged black/preview-bars state for the actual 2.5D renderer."""
+        body = await _json_dict(request)
+        cue = body.get("cue")
+        enabled = body.get("enabled")
+        if cue not in {"blackout", "preview_bars"} or not isinstance(enabled, bool):
+            raise HTTPException(400, "cue must be blackout/preview_bars and enabled must be boolean")
+        if hub is None:
+            raise HTTPException(503, "Production state hub unavailable")
+        now = time.time()
+        patch = {cue: enabled, cue + "_seq": now}
+        hub.update_production_state(patch)
+        await hub.broadcast_system_event({"type": "production_video_cue", "payload": {**patch, "cue": cue, "actor": str(identity.get("user_id") or "director")}})
+        _blackbox_event("production.video_cue", source="system",
+                        actor=str(identity.get("user_id") or "director"), data=patch)
+        return {"ok": True, **patch}
+
     @router.post("/api/production/panic")
     async def production_panic(identity: Dict[str, Any] = Depends(require_role("mod"))):
         """Emergency: stop active captures, silence program audio, cue black.
