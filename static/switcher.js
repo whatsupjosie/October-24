@@ -50,8 +50,10 @@
   // With the shared key map (static/control_keys.js) the keys and the buttons are wired by static/control_switcher.js, and this
   // built-in set (Space/Enter = cut, 1-9 = preview, Shift+1-9 = program) is not used, so two handlers never fight over a key.
   if (!window.PubCastControlKeys) document.addEventListener('keydown', e => {
-    // Don't fire on input elements
-    const tag = document.activeElement?.tagName?.toLowerCase();
+    // Never let an editing transport key switch live Program.
+    if (document.getElementById('station-director')?.classList.contains('hidden')) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    const tag = (e.target?.tagName || document.activeElement?.tagName || '').toLowerCase();
     if (['input', 'textarea', 'select'].includes(tag)) return;
 
     const k = e.key;
