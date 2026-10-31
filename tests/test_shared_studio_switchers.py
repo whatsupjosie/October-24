@@ -26,7 +26,9 @@ def test_shared_cut_swaps_actual_program_and_preview():
     assert svc.auto(transition="dissolve", duration_ms=600) is True
     assert svc.state()["program"] == "wide_shot"
     assert svc.state()["preview"] == "medium_shot"
-    assert svc.state()["transition"] == {"type": "dissolve", "duration_ms": 600}
+    assert svc.state()["transition"]["type"] == "dissolve"
+    assert svc.state()["transition"]["duration_ms"] == 600
+    assert isinstance(svc.state()["transition"]["started_at"], float)
 
 
 def test_bad_transition_does_not_mutate_switcher():
