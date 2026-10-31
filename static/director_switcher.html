@@ -922,64 +922,49 @@ function updateMonitors() {
   renderButtons();
 }
 
-function setPreview(id, btn) {
-  if (!cameraById(id)) id = program || "cam1";
-  if (id === program) log("preview selected current Program camera safely");
-  preview = id;
-  if (btn) clickFlash(btn);
+// One camera source of truth for every studio: the canonical backend switcher.
+// The console labels remain provisional until the owner supplies final hardware imagery.
+function syncVideoSwitcherState(snapshot){
+  if(!snapshot||!Array.isArray(snapshot.sources))return false;
+  const ids=new Map(cameras.map(c=>[c.sourceId,c.id]));
+  const nextCameras=snapshot.sources.map((s,i)=>({
+    id:ids.get(s.id)||("cam"+(i+1)),sourceId:s.id,
+    label:s.name||s.id,shot:s.name||s.id,transport:s.transport||"unknown"
+  }));
+  cameras.splice(0,cameras.length,...nextCameras);
+  program=cameras.find(c=>c.sourceId===snapshot.program)?.id||program;
+  preview=cameras.find(c=>c.sourceId===snapshot.preview)?.id||preview;
+  backendTruth.switcher=snapshot;
   updateMonitors();
-  runStudioAction("camera.switch.preview", {source_id: cameraById(id).sourceId});
-  log("preview set to " + cameraById(id).label);
-  toast("PREVIEW " + cameraById(id).shot.toUpperCase());
+  return true;
 }
-
-function setProgram(id, btn) {
-  if (!cameraById(id)) id = "cam1";
-  program = id;
-  if (btn) clickFlash(btn);
-  updateMonitors();
-  runStudioAction("camera.switch.program", {source_id: cameraById(id).sourceId});
-  postJSON("/api/state/production", {camera: cameraById(id).sourceId, action: "program"});
-  log("program set to " + cameraById(id).label);
-  toast("PROGRAM " + cameraById(id).shot.toUpperCase());
+async function videoAction(path,payload,description){
+  const result=await postJSON(path,payload);
+  if(!result||!syncVideoSwitcherState(result)){toast("SWITCH FAILED");log(description+" failed: backend state unavailable");return false;}
+  log(description+" confirmed by shared switcher");
+  toast(description);
+  return true;
 }
-
-function cut() {
-  if (!cameraById(preview)) {
-    preview = program || "cam1";
-    log("cut guarded: invalid Preview corrected to current Program");
-  }
-  const old = program;
-  program = preview;
-  preview = old;
-  updateMonitors();
-  runStudioAction("camera.cut", {});
-  postJSON("/api/state/production", {camera: cameraById(program).sourceId, transition: "cut"});
-  log("cut to " + cameraById(program).label);
-  toast("CUT");
+async function setPreview(id,btn){
+  const cam=cameras.find(c=>c.id===id);
+  if(!cam){toast("BAD CAMERA");return false;}
+  if(btn)clickFlash(btn);
+  return videoAction("/api/switcher/preview/"+encodeURIComponent(cam.sourceId),{},"PREVIEW");
 }
-
-function fade() {
-  if (fadeInProgress) {
-    log("fade ignored: transition already in progress");
-    toast("FADE BUSY");
-    return;
-  }
-  if (!cameraById(preview)) {
-    preview = program || "cam1";
-    log("fade guarded: invalid Preview corrected to current Program");
-  }
-  fadeInProgress = true;
-  setTruthCard("truthScene", "warn", "Fading", `${cameraById(preview).label} moving to Program`);
-  setTimeout(() => {
-    program = preview;
-    updateMonitors();
-    runStudioAction("camera.switch.program", {source_id: cameraById(program).sourceId});
-    postJSON("/api/state/production", {camera: cameraById(program).sourceId, transition: "fade"});
-    log("fade to " + cameraById(program).label);
-    toast("FADE");
-    fadeInProgress = false;
-  }, 260);
+async function setProgram(id,btn){
+  const cam=cameras.find(c=>c.id===id);
+  if(!cam){toast("BAD CAMERA");return false;}
+  if(btn)clickFlash(btn);
+  return videoAction("/api/switcher/cut/"+encodeURIComponent(cam.sourceId),{},"PROGRAM");
+}
+async function cut(){
+  return videoAction("/api/switcher/cut",{},"CUT");
+}
+async function fade(){
+  if(fadeInProgress){toast("FADE BUSY");return false;}
+  fadeInProgress=true;
+  try{return await videoAction("/api/switcher/transition",{type:"dissolve",duration_ms:600},"DISSOLVE");}
+  finally{fadeInProgress=false;}
 }
 
 async function toggleRecord(btn) {
@@ -1103,7 +1088,7 @@ async function exportRecording(btn) {
 
 async function refreshTruth() {
   backendTruth.failures = [];
-  const [health, studio, camerasState, recordingStorage, mocap, timeline, voxel, ai] = await Promise.all([
+  const [health, studio, camerasState, recordingStorage, mocap, timeline, voxel, ai, switcher] = await Promise.all([
     getJSON("/health"),
     getJSON("/api/studio/status"),
     getJSON("/api/cameras"),
@@ -1111,14 +1096,16 @@ async function refreshTruth() {
     getJSON("/api/mocap/status"),
     getJSON("/api/timeline/status"),
     getJSON("/api/voxel/status"),
-    getJSON("/api/byok/ollama/status")
+    getJSON("/api/byok/ollama/status"),
+    getJSON("/api/switcher/state")
   ]);
-  backendTruth = {health, studio, cameras: camerasState, recordingStorage, mocap, timeline, voxel, ai, failures: backendTruth.failures};
+  backendTruth = {health, studio, cameras: camerasState, recordingStorage, mocap, timeline, voxel, ai, switcher, programAudio:backendTruth.programAudio, failures: backendTruth.failures};
+  if(!switcher.error) syncVideoSwitcherState(switcher);
   setTruthCard("truthHealth", health.error ? "bad" : "ok", health.error ? "Offline" : "OK", health.error || `cameras=${health.systems?.cameras ?? "?"} recording_profiles=${health.systems?.recording_profiles ?? "?"}`);
   const studioState = studio.state || studio.status || (studio.available ? "available" : "unavailable");
   setTruthCard("truthRecording", recording ? "bad" : (studio.available ? "ok" : "warn"), recording ? "Local REC" : "Idle", `studio=${studioState}; duration=${Math.round(studio.recording_duration || 0)}s; recording pipeline not proven without browser/backend test`);
   setTruthCard("truthMocap", mocap.available ? "ok" : "bad", mocap.available ? "Available" : "Unavailable", mocap.error || JSON.stringify(mocap).slice(0, 90));
-  setTruthCard("truthAudio", "warn", audio.some(a => a.muted) ? "Muted" : "Local", `muted=${audio.filter(a => a.muted).map(a => a.name).join(", ") || "none"}; storage=${recordingStorage.error ? "unavailable" : "reachable"}`);
+  await refreshAudioTruth();
   setTruthCard("truthTimeline", timeline.error ? "bad" : "ok", timeline.state || "Unknown", `progress=${Math.round((timeline.progress || 0) * 100)}% timeline=${timeline.timeline_name || timeline.timeline || "none"}`);
   setTruthCard("truthAI", ai.error ? "bad" : "warn", ai.error ? "Unavailable" : (ai.status || "Reachable"), ai.error || `Studio/Architect model availability must be confirmed before show`);
   setTruthCard("truthExport", recording ? "bad" : (health.error ? "bad" : "warn"), recording ? "Locked" : "Visible", exportDetail());
