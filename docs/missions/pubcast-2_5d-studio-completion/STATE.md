@@ -48,3 +48,13 @@ Always continue after a milestone if actionable work remains.
 - Outstanding critical: real browser and FastAPI testing, remote media ingest, Blackbox, full stations/recording wiring.
 
 - Genre coverage expanded to eight packages: formal debate and political roundtable are distinct, with four individually blocked panelists in the roundtable. Director switcher now loads canonical camera registry, checks server command responses, removes invented audio/VU bars and displays actual bus states; monitor output remains explicitly unbound pending real video-feed integration.
+
+## Three-round adversarial engineering audit — latest October 30 checkpoint
+- **Round 1 (shortcuts):** camera IDs without real frames; fake/optimistic switcher, fake VU/timecode, stale GLB loads, missing true recording path; gaps identified.
+- **Round 2 (media/defects):** authenticated, bounded JPEG confidence frame media plane and mounted FastAPI route, real Program/Preview frame publisher and remote Director reader, per-camera encode isolation/throttling, lease/tombstones/cleanup/backoff, atomic pair activation and server dissolve timestamps; 2.5D source declared NOT server-recordable without full ingest.
+- **Round 3 (systems):** PANIC actually requests backend capture stop, audio stop/master zero, blackout cue and error reporting; no unacknowledged PAUSE/MARK/BARS/PANIC/knob fake successes; synchronized image Control Room, camera banking across 8 genre presets, safety of stale GLB loaders, corrected server cue precedence, all camera CUT entry points use CameraManager.take().
+- Pivotal decision: use **browser-origin actual video + canonical shared switcher**, with independent local offline fallback. Implemented low-rate real JPEG confidence feeds, not broadcast-grade full-rate media. See THREE_SOLUTIONS_PIVOT.md.
+- No browser or full FastAPI acceptance run yet. Cross-client audio, server full-rate video ingest, Blackbox and recorded media remain release blockers.
+- 12 isolated V8 behavior/geometry checks passed; ten JS modules and both Control Room inline scripts parsed (proper inline extraction). These do not prove browser/runtime operation.
+- GitHub Actions jobs showed failure with zero steps and no retrievable logs; cannot claim test commands started. CI runner investigation remains blocked.
+- **Next:** obtain an executable checkout/runner; run Node and pytest; exercise real production, remote video, local recorder and PANIC; address failures; implement full-rate media and Blackbox integration; performance/debug pass; owner review only after evidence.
