@@ -58,3 +58,22 @@ node --check static/production25d_app.js
 ```
 
 These are instructions, not claims that the commands have already passed.
+
+## Shared audio and video control (work in progress)
+
+When served by the authenticated full PubCast host, starting a 2.5D production attempts to register its genre-specific virtual cameras with the **existing** CameraManager via `/api/cameras/register` and selects Program/Preview through **the same** `/api/switcher` used by the ordinary Control Room and Director Switcher. This requires moderator permission. The 2.5D UI displays `VIDEO: SHARED SWITCHER` only after server acknowledgment; otherwise it displays `VIDEO: LOCAL ONLY` and logs the actual error.
+
+The established Director Switcher and Control page now select Program/Preview from shared server state. The Director Switcher's audio controls use actual `/api/program-audio` mute/status actions; synthetic bouncing audio meters were removed. The Control page mixer Apply updates program master, dialogue, and music gain with checked HTTP responses.
+
+The local production recorder can capture the established browser program audio mixer output and optionally mix a microphone track. The backend audio status snapshot initializes new clients to the current master/bus settings. **This does not yet deliver media streams from other browsers into the local recorder or place live 2.5D frames into the server video transport.** That is a distinct, outstanding integration requirement.
+
+On a standalone static HTTP server, those backend APIs will be unavailable, so the stage operates in explicitly local-only mode; do not call it multi-client synchronized. Studio browser recordings are IndexedDB-backed, not a complete server Blackbox session.
+
+Additional test source files:
+
+```sh
+node --test tests/test_production25d_switcher_bridge.cjs
+python -m pytest -q tests/test_shared_studio_switchers.py
+```
+
+These commands still require execution on a full local checkout or available CI system.
