@@ -21,7 +21,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
+from zipfile import BadZipFile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
@@ -604,14 +606,27 @@ def create_production_router(
             raise HTTPException(400, "Uploaded file must have a filename")
         if not filename.lower().endswith(".zip"):
             raise HTTPException(400, "Recording import requires a .zip bundle")
-        import_path = unique_child_path(import_dir, filename)
-        with open(import_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        limit = int(os.environ.get("PUBCAST_RECORDING_IMPORT_MAX_BYTES", str(64 * 1024 ** 3)))
+        # Reserve atomically: two uploads with the same name must not clobber
+        # one another between path selection and opening the file.
+        while True:
+            import_path = unique_child_path(import_dir, filename)
+            try:
+                upload_target = open(import_path, "xb")
+                break
+            except FileExistsError:
+                continue
         try:
-            session = recording.import_session(import_path)
-        except (ValueError, FileNotFoundError) as exc:
-            raise HTTPException(400, str(exc))
+            size = 0
+            with upload_target as f:
+                while chunk := await file.read(1 << 20):
+                    size += len(chunk)
+                    if size > limit:
+                        raise HTTPException(413, "Recording upload exceeds the import storage budget")
+                    f.write(chunk)
+            session = await asyncio.to_thread(recording.import_session, import_path)
+        except (ValueError, FileNotFoundError, BadZipFile) as exc:
+            raise HTTPException(400, str(exc)) from exc
         return session.to_dict()
 
     @router.get("/api/recording/storage")

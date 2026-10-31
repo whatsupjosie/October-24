@@ -20,6 +20,7 @@ const state={pkg:null,performers:[],assets:{},avatarBridge:null,avatarError:"",
 programId:null,previewId:null,
 session:null,media:null,mediaError:null,recorder:null,videoStream:null,micStream:null,audioContext:null,micSource:null,
 micGain:null,micAnalyser:null,audioDest:null,recordingPromise:null,recordingComplete:null,recordedChunks:[],
+recordingStartedAt:0,recordingId:null,recovery:null,
 recordingMime:"",microphoneMuted:false,microphoneLevel:1,selected:null,playbackUrl:null,downloadUrl:null,
 lastTick:0,blackout:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
 storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0,
@@ -52,6 +53,8 @@ function setControls(){
  el.start.disabled=active;el.genre.disabled=active;el.stop.disabled=!active||stopping;
  el.record.disabled=!active||rec||stopping||!state.storageReady;
  el.recordStop.disabled=!rec||stopping;
+ el.record.disabled=el.record.disabled||!!state.recovery;
+ $("recoveryPanel").hidden=!state.recovery;
  el.recBadge.textContent=rec?"● REC "+state.recordingMime:"REC OFF";
  el.recBadge.style.color=rec?"#ff7070":"";
  el.audioBadge.textContent=state.micStream?"MIC "+(state.microphoneMuted?"MUTED":"ACTIVE"):"MIC OFF";
@@ -267,6 +270,7 @@ async function startProduction(){
 async function stopProduction(){
  if(!state.session)return;
  if(state.recorder)await stopRecording();
+ if(state.recovery)throw Error("Save the unsaved take before ending this production. A recovery copy can also be downloaded below.");
  const sess=state.session;
  emit("production.stop",{});
  Core.finish(sess,Date.now());
@@ -299,6 +303,7 @@ function cleanupMedia(){
 async function startRecording(){
  if(!state.session)throw Error("Start a production before recording");
  if(state.recorder||state.recordingPromise)throw Error("Already recording");
+ if(state.recovery)throw Error("Save or download the unsaved take before recording again");
  if(!state.storageReady)throw Error("Local persistent session storage is unavailable");
  if(typeof el.program.captureStream!=="function")throw Error("Canvas.captureStream is unsupported");
  const mime=recordedMime();
@@ -338,6 +343,8 @@ async function startRecording(){
    state.recordingMime=rec.mimeType||mime||"browser default";
    rec.ondataavailable=e=>{if(e.data?.size)state.recordedChunks.push(e.data)};
    rec.onerror=e=>{state.mediaError=e.error||Error("MediaRecorder error")};
+   state.recordingStartedAt=Date.now();
+   state.recordingId=state.session.id+"-take-"+state.recordingStartedAt;
    rec.start(1000);state.recorder=rec;
    emit("recording.start",{mime:state.recordingMime,microphone:!!state.micStream,
      sharedProgramMix:!!state.programMixSource,canvas:[Core.W,Core.H]});
@@ -351,17 +358,28 @@ async function stopRecording(){
  state.recordingPromise=new Promise((resolve,reject)=>{
    rec.onstop=async ()=>{
      try{
-       if(state.mediaError)throw state.mediaError;
+       const captureError=state.mediaError;
        const blob=new Blob(state.recordedChunks,{type:rec.mimeType||"video/webm"});
        if(blob.size===0)throw Error("Recorder generated no video data");
        emit("recording.stop",{bytes:blob.size,mime:blob.type});
        const sess=state.session;
        if(!sess)throw Error("Session disappeared before recording completed");
-       sess.media={mime:blob.type,bytes:blob.size,durationMs:Date.now()-Date.parse(sess.startedAt)};
+       // Preserve every take independently; a second Record must never replace
+       // the first take's bytes, including sessions from the old single-take store.
+       if(!sess.recordings)sess.recordings=sess.media?[Object.assign({id:sess.id},sess.media)]:[];
+       sess.media={id:state.recordingId,mime:blob.type,bytes:blob.size,
+         startedAt:new Date(state.recordingStartedAt).toISOString(),
+         offsetMs:state.recordingStartedAt-Date.parse(sess.startedAt),
+         durationMs:Date.now()-state.recordingStartedAt,incomplete:!!captureError};
+       sess.recordings.push(sess.media);
+       state.recovery={session:sess,blob,take:sess.media};
        await Store.save(sess,blob);
-       log("REC SAVED "+blob.size+" bytes; "+sess.events.length+" session events");
-       await refreshSessions();resolve(blob);
-     }catch(e){state.mediaError=e;log("REC FAILED "+e.message);reject(e)}
+       state.recovery=null;
+       log((captureError?"PARTIAL TAKE SAVED ":"REC SAVED ")+blob.size+" bytes; "+sess.events.length+" session events");
+       await refreshSessions();
+       if(captureError)throw Error("Recording interrupted; available partial media was saved: "+captureError.message);
+       resolve(blob);
+     }catch(e){state.mediaError=e;log("REC FAILED "+e.message+(state.recovery?"; unsaved media remains available for recovery":""));reject(e)}
      finally{
        cleanupMedia();state.recordedChunks=[];state.recorder=null;state.recordingPromise=null;setControls();
      }
@@ -375,14 +393,18 @@ async function refreshSessions(){
  const sessions=await Store.list();el.sessionList.replaceChildren();
  if(!sessions.length){el.sessionList.textContent="No saved sessions yet.";return;}
  for(const session of sessions){
+  const takes=session.recordings?.length?session.recordings:[session.media||null];
+  for(const [index,take] of takes.entries()){
    const btn=document.createElement("button");
-   btn.textContent=(session.endedAt?"✓ ":"● ")+session.packageId+" · "+session.startedAt.slice(0,19).replace("T"," ")+" · "+(session.media?.bytes||0)+" bytes";
-   btn.addEventListener("click",()=>safe(()=>selectSession(session.id)));
+   btn.textContent=(session.endedAt?"✓ ":"● ")+session.packageId+" · "+session.startedAt.slice(0,19).replace("T"," ")+" · "+(take?.incomplete?"INCOMPLETE ":"")+"Take "+(index+1)+" · "+(take?.bytes||0)+" bytes";
+   btn.addEventListener("click",()=>safe(()=>selectSession(session.id,take?.id)));
    el.sessionList.appendChild(btn);
+  }
  }
 }
-async function selectSession(id){
- const item=await Store.read(id);if(!item.session)throw Error("Session not found");
+async function selectSession(id,takeId){
+ const item=await Store.read(id,takeId);if(!item.session)throw Error("Session not found");
+ item.takeId=takeId||item.session.media?.id||id;
  if(state.playbackUrl){URL.revokeObjectURL(state.playbackUrl);state.playbackUrl=null;}
  state.selected=item;
  if(item.blob){state.playbackUrl=URL.createObjectURL(item.blob);el.playback.src=state.playbackUrl;}
@@ -417,6 +439,10 @@ async function loadActors(){
  const generation=state.avatarGeneration;
  if(state.avatarLoadingGeneration===generation)return; // avoid double simultaneous loads
  state.avatarLoadingGeneration=generation;
+ const previous=state.avatarLoadTask;
+ const work=async()=>{
+ if(previous)await previous.catch(()=>{});
+ if(generation!==state.avatarGeneration)return;
  const failures=[],loaded=[];
  for(const p of state.performers.slice()){
   if(generation!==state.avatarGeneration)break;
@@ -433,6 +459,12 @@ async function loadActors(){
  el.avatarStatus.textContent="3D GLB actors: "+loaded.join(", ")+(failures.length?" | LOAD FAILED: "+failures.join("; "):"");
  if(failures.length)log("3D ASSET FAILURE "+failures.join("; "));
  else log("3D ACTORS loaded "+loaded.length);
+ };
+ // Stable performer IDs can be reused when the same genre is reloaded.
+ // Finish stale loaders before starting replacements, so their cleanup cannot
+ // clear the new generation's live actor.
+ state.avatarLoadTask=work();
+ return state.avatarLoadTask;
 }
 function frame(now){
  window.requestAnimationFrame(frame);
@@ -522,7 +554,15 @@ function initializeControls(){
  }));
  el.micLevel.addEventListener("input",()=>{state.microphoneLevel=Number(el.micLevel.value)/100;if(state.micGain&&!state.microphoneMuted)state.micGain.gain.value=state.microphoneLevel;});
  el.micMute.addEventListener("click",()=>{state.microphoneMuted=!state.microphoneMuted;if(state.micGain)state.micGain.gain.value=state.microphoneMuted?0:state.microphoneLevel;setControls();emit("audio.mic_mute",{muted:state.microphoneMuted})});
- el.download.addEventListener("click",()=>safe(()=>{if(state.selected?.blob)downloadBlob(state.selected.blob,state.selected.session.id+"."+(/mp4/.test(state.selected.blob.type)?"mp4":"webm"))}));
+ el.download.addEventListener("click",()=>safe(()=>{if(state.selected?.blob)downloadBlob(state.selected.blob,state.selected.takeId+"."+(/mp4/.test(state.selected.blob.type)?"mp4":"webm"))}));
+ $("recoveryDownload").addEventListener("click",()=>safe(()=>{
+   if(state.recovery)downloadBlob(state.recovery.blob,state.recovery.take.id+"."+(/mp4/.test(state.recovery.blob.type)?"mp4":"webm"));
+ }));
+ $("recoverySave").addEventListener("click",()=>safe(async()=>{
+   const recovery=state.recovery;if(!recovery)return;
+   await Store.save(recovery.session,recovery.blob);state.recovery=null;
+   el.alert.textContent="";status("ON AIR");setControls();await refreshSessions();log("RECOVERY SAVED "+recovery.take.id);
+ }));
  el.manifest.addEventListener("click",()=>safe(()=>{if(state.selected?.session)downloadBlob(new Blob([JSON.stringify(state.selected.session,null,2)],{type:"application/json"}),state.selected.session.id+".json")}));
  window.addEventListener("pagehide",()=>{
    state.mediaPublisher?.stop().catch(()=>{});
@@ -532,6 +572,7 @@ function initializeControls(){
    state.loadedActorIds.clear();
    if(state.recorder&&state.recorder.state==="recording"){try{state.recorder.requestData()}catch(_){}}
  });
+ window.addEventListener("beforeunload",e=>{if(state.recorder||state.recovery){e.preventDefault();e.returnValue="";}});
  document.addEventListener("pubcast-glb-ready",()=>loadActors());
 }
 async function init(){

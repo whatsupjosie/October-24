@@ -299,7 +299,17 @@ def test_without_the_host_behind_it_the_walker_says_so_and_keeps_walking(page, t
         srv.terminate(); srv.wait(5)
 
 
-def test_bella_faux_pas_studio_opens_from_the_foresight_counter_in_the_dressing_room(host, browser, owner):
+@pytest.fixture
+def fresh_studio_progress(host, owner):
+    # Earlier tests intentionally save the owner's room on the same host.
+    # These default-entry tests require a fresh progress record; preserving
+    # real resume behavior must not depend on test collection order.
+    response = httpx.put(host + "/api/studio/progress", headers={"Authorization": "Bearer " + owner["access_token"]},
+                         json={"progress": {}}, timeout=10)
+    assert response.status_code == 200
+
+
+def test_bella_faux_pas_studio_opens_from_the_foresight_counter_in_the_dressing_room(host, browser, owner, fresh_studio_progress):
     """The Counter is the program's front door: its menu opens the walker in a tray, live, under the same session.
     Uses a plain page (no WebSocket recorder: the Counter does not start under it)."""
     import json
@@ -331,7 +341,7 @@ def test_bella_faux_pas_studio_opens_from_the_foresight_counter_in_the_dressing_
 
 
 
-def test_the_studio_starts_in_the_dressing_room_with_no_start_given(host, signed_in):
+def test_the_studio_starts_in_the_dressing_room_with_no_start_given(host, signed_in, fresh_studio_progress):
     page = signed_in
     _open(page, host + "/walk")
     assert page.evaluate("window.PubCastWalk.S.room.id") == "dressing_room"

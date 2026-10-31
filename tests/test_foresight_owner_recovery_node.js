@@ -83,6 +83,7 @@ async function startupTests(){
  for(const owner of ['alice','bob']){
    let restored,key;
    const ctx={window:{},hintEl:{style:{}},ForesightFiles:{ownerScope:async()=>owner},
+     hostLayout:{enable(){},load:async()=>null,stamp:()=>0,save(){}},
      params:{has:k=>k==='once'},counter:{setStorageKey:k=>{key=k},restore:v=>{restored=v}},
      refreshDots(){},setInterval(){},updateHint(){},localStorage:{getItem:k=>layouts.get(k)}};
    vm.createContext(ctx);vm.runInContext(boot,ctx);await ctx.boot();
@@ -92,9 +93,10 @@ async function startupTests(){
  assert.equal(layouts.get('foresight.counter.v3'),legacy,'unowned legacy layouts remain intact');
  const create=html.slice(html.indexOf('function createRenderer('),html.indexOf('const G = createRenderer'));
  const notice={style:{},appendChild(link){this.link=link}};
- const graphics={ForesightGL:class{constructor(){throw Error('No GPU')}},document:{createElement:()=>({})}};
+ const graphics={ForesightGL:class{constructor(){throw Error('No GPU')}},
+   ForesightCanvas2D:class{constructor(){throw Error('No 2D renderer')}},document:{createElement:()=>({})}};
  vm.createContext(graphics);vm.runInContext(create,graphics);
- assert.throws(()=>graphics.createRenderer({},notice),/No GPU/);
+ assert.throws(()=>graphics.createRenderer({},notice),/No 2D renderer/);
  assert.equal(notice.link.href,'/writers-room');
- console.log('PASS: account-scoped layout restore preserves legacy; missing graphics offers the genuine 2i route');
+ console.log('PASS: account-scoped layout restore preserves legacy; missing renderers offer the genuine 2i route');
 })().catch(error=>{console.error(error);process.exitCode=1});

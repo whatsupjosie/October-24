@@ -23,6 +23,8 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 .pill{padding:4px 9px;border:1px solid var(--edge);border-radius:100px}
 #timecode{font:16px ui-monospace,monospace;font-variant-numeric:tabular-nums}
 #playback{width:100%;max-height:300px;background:#000}#assetInfo{word-break:break-word}
+aside{min-width:0}#avatarStatus,#description{overflow-wrap:anywhere}
+.field select,.field input[type=file]{max-width:100%;min-width:0;width:100%}
 @media(max-width:950px){main{grid-template-columns:1fr}}@media(max-width:500px){main{padding:8px;gap:8px}section{padding:9px}header{padding:9px}}
 </style></head>
 <body>
@@ -62,6 +64,8 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 <div class="row"><label class="field">MIC LEVEL <input type="range" id="micLevel" min="0" max="100" value="100" disabled></label>
 <button id="micMute" disabled>MUTE MIC</button><label class="field">REAL MIC METER <meter id="micMeter" min="0" max="1" value="0"></meter></label></div>
 <p id="alert" role="alert"></p>
+<div id="recoveryPanel" hidden role="alert"><p>The take is still in memory. Save it or download a recovery copy before closing this page.</p>
+<div class="row"><button id="recoveryDownload">DOWNLOAD UNSAVED TAKE</button><button id="recoverySave">RETRY SAVING</button></div></div>
 </section>
 <section style="margin-top:12px"><h2>VISION MIXER</h2>
 <div id="cameras" class="camera-grid" aria-label="Camera shot selection"></div>

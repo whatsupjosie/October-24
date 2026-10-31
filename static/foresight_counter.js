@@ -633,12 +633,14 @@
     // Grow (or shrink) a tray toward w x h over a few frames, keeping its shape and its spot (upper left stays put
     // where it can), the others making room as it comes. o.push: the others may be squeezed to make that room (Make
     // room, a new content that needs it, Reset on the main tray); without it the tray only takes room that is free.
-    // Normal growth stops after 120 physics frames; a new tray gets up to 240 to make room. If its
+    // Normal growth stops after 120 physics frames (or 3 seconds); a new tray
+    // gets up to 240 frames (or 4 seconds) to make room. Slow rendering must not
+    // leave every later open request waiting indefinitely. If its
     // contents (o.need) still want more than that, they are shown scaled down to fit, as in a squeezed tray, and the
     // tray grows back to full size by itself once room comes free.
     function growTo(t, w, h, o){
       o = o || {};
-      t.grow = {w, h, push: !!o.push, need: o.need || null, frames: 0, stuck: 0, left: t.cx - visW(t)/2, top: t.cy - visH(t)/2, centre: t.locked ? [t.cx, t.cy] : null};
+      t.grow = {w, h, push: !!o.push, need: o.need || null, frames: 0, stuck: 0, startedAt: clock(), left: t.cx - visW(t)/2, top: t.cy - visH(t)/2, centre: t.locked ? [t.cx, t.cy] : null};
       dirty = true; settle = 60;
     }
     function growStep(t){
@@ -672,7 +674,7 @@
         }
         if(g.push) for(const u of yielding) if(!u.locked) u.squeezeReq = Math.max(u.squeezeReq || 0, 12);
       } else g.stuck = 0;
-      if(g.stuck > (t.admitting ? 100 : 40) || g.frames > (t.admitting ? 240 : 120)){
+      if(g.stuck > (t.admitting ? 100 : 40) || g.frames > (t.admitting ? 240 : 120) || clock()-g.startedAt > (t.admitting ? 4000 : 3000)){
         t.grow = null; scheduleSave();
         if(g.need && (visW(t) < g.need.w - 1 || visH(t) < g.need.h - 1)) toast('Showing ' + activeContent(t).title + ' a little smaller until there is more room');
       }

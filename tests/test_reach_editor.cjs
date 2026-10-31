@@ -112,7 +112,7 @@ const deadline=setTimeout(()=>{console.error('FAIL: editor test did not finish')
   const count=h.run('chatHistory.length');
   h.run(`$('chatInput').value='Try again.';`);await h.run('sendChat()');
   assert.equal(h.run('chatHistory.length'),count+1);
-  assert.match(h.w.document.getElementById('chatLog').textContent,/Could not reach the model/);
+  assert.match(h.w.document.getElementById('chatLog').textContent,/reply was not confirmed: synthetic unavailable provider/);
   assert.equal(h.w.document.getElementById('chatSendBtn').disabled,false);
   console.log('PASS: unavailable model displays an error without inventing an assistant turn');
 

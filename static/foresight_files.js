@@ -3,6 +3,14 @@
 'use strict';
 const DB='pubcast-foresight-files-v1', STORE='files';
 let database, ownerPromise, ownerCredential;
+function newId(){
+  if(root.crypto?.randomUUID)return root.crypto.randomUUID();
+  if(!root.crypto?.getRandomValues)throw Error('Secure random IDs unavailable');
+  const bytes=root.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 function credential(){return sessionStorage.getItem('pubcast_token')||localStorage.getItem('pubpartner.auth.token.v1')||''}
 async function ownerScope(){
   const token=credential();
@@ -166,7 +174,7 @@ async function mount(c,host,file,options={}){
     flush:persist,saveAs:saveToWorkspace};
   sessions.set(c,session);
   try{
-    c.data.fileId=c.data.fileId||crypto.randomUUID();host.changed();
+    c.data.fileId=c.data.fileId||newId();host.changed();
     value=await record(c.data.fileId);
     if(!value&&file){value={id:c.data.fileId,name:file.name,mime:file.type,original:file,updated:Date.now()};await record(value.id,value)}
     if(!alive)return session;
@@ -249,5 +257,5 @@ async function mount(c,host,file,options={}){
   return session;
 }
 async function list(){const d=await db();return new Promise((resolve,reject)=>{const t=d.transaction(STORE,'readonly'),r=t.objectStore(STORE).getAll();t.oncomplete=()=>resolve(r.result.map(({id,name,updated,original})=>({id,name,updated,size:original?.size||0})));t.onerror=()=>reject(t.error)})}
-root.ForesightFiles={ownerScope,encode:base64,workspace,list,mount,get:c=>sessions.get(c),record,decodeText,download};
+root.ForesightFiles={newId,ownerScope,encode:base64,workspace,list,mount,get:c=>sessions.get(c),record,decodeText,download};
 })(window);

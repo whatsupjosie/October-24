@@ -8,7 +8,8 @@ const C=require("../static/production25d_core.js");
 const R=require("../static/production25d_renderer.js");
 let count=0;
 function check(fn){fn();count++;}
-check(()=>assert.equal(Object.keys(C.PACKAGES).length,7));
+check(()=>assert.deepEqual(Object.keys(C.PACKAGES).sort(),
+ ["news","late_night","debate","political_discussion","audience","game","variety","general"].sort()));
 for(const [id,pkg] of Object.entries(C.PACKAGES)){
  check(()=>assert.equal(C.validate(pkg),true,id));
  check(()=>assert.ok(pkg.cameras.length>=5,id));

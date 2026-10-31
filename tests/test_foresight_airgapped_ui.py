@@ -120,12 +120,13 @@ def test_real_counter_integrates_2i_hosting_and_restorable_layout(counter_page):
     page.evaluate("__programs.open('twoi')")
     page.wait_for_function("__counter.trays.some(t=>t.stack[0].type==='twoi') && !__counter.trays[0].hidden", timeout=5000)
     # the Counter adds a per-session nonce to the tray's address (?foresightSession=...), so match the path, not the whole address (it is also absolute once the page has an origin)
+    page.locator('iframe[src*="/writers-room"]').wait_for(state="attached")
     assert page.locator('iframe[src*="/writers-room"]').count() == 1
     page.evaluate("__counter.saveNow()")
     saved = page.evaluate("__counter.serialize()")
     assert len(saved["trays"]) == 1
     assert saved["trays"][0]["contents"][0]["type"] == "twoi"
-    assert page.evaluate("localStorage.getItem('foresight.counter.v3')")
+    assert page.evaluate("localStorage.getItem('foresight.counter.v3:airgapped-test')")
     # Reconstruct a fresh counter, not a merge into an already populated one.
     restored = page.evaluate("""snap => {
       __counter.destroy();

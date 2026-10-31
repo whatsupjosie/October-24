@@ -5,19 +5,23 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import os
 import re
 import shutil
 import subprocess
 import time
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED, ZIP_STORED
 
 from .cameras import CameraManager, CameraSource
+from .persistence import write_json
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +89,7 @@ class RecordingSession:
     ended_at: Optional[float] = None
     artifacts: List[RecordingArtifact] = field(default_factory=list)
     markers: List[RecordingMarker] = field(default_factory=list)
+    recovery: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict:
         return {
@@ -99,6 +104,7 @@ class RecordingSession:
             "started_at": self.started_at,
             "updated_at": self.updated_at,
             "ended_at": self.ended_at,
+            "recovery": self.recovery,
             "artifacts": [
                 {
                     "name": art.name,
@@ -145,10 +151,36 @@ class RecordingService:
             directory.mkdir(parents=True, exist_ok=True)
 
         self._storage_cache = {
-            "local_free_gb": 240,
-            "cloud_used_gb": 1200,
-            "backup_status": "syncing",
+            "cloud_used_gb": None,
+            "backup_status": "not configured",
         }
+        self._restore_sessions()
+
+    def _restore_sessions(self) -> None:
+        """Restore real persisted takes; never resume an interrupted capture by label."""
+        for directory in self.recordings_dir.iterdir():
+            if not directory.is_dir() or directory.is_symlink():
+                continue
+            metadata = directory / f"{directory.name}.json"
+            if not metadata.is_file():
+                continue
+            try:
+                if metadata.stat().st_size > 8 * 1024 ** 2:
+                    raise ValueError("Recording metadata exceeds the recovery budget")
+                payload = json.loads(metadata.read_text(encoding="utf-8"))
+                session_id = self._validated_session_id(payload.get("session_id"))
+                if session_id != directory.name:
+                    raise ValueError("Recording metadata does not match its directory")
+                session = self._session_from_dict(payload)
+                if session.state not in {RecordingState.STOPPED, RecordingState.ARCHIVED}:
+                    session.recovery = {"previous_state": session.state.value, "detected_at": time.time(),
+                                        "last_confirmed_at": session.updated_at, "interrupted": True}
+                    session.state = RecordingState.STOPPED
+                    session.ended_at = session.updated_at
+                    self._write_metadata(session)
+                self._sessions[session_id] = session
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                logger.exception("Could not restore recording metadata %s; original files retained", metadata)
 
     def _blackbox_event(self, event_type: str, *, actor: str = "SYS", data: Optional[Dict[str, Any]] = None) -> None:
         if self.blackbox_witness is not None:
@@ -240,7 +272,7 @@ class RecordingService:
         session_id = self._validated_session_id(
             session_id or f"rec_{uuid.uuid4().hex[:10]}"
         )
-        if session_id in self._sessions:
+        if session_id in self._sessions or self._session_dir(session_id).exists():
             raise ValueError(f"Session '{session_id}' already active")
         self._validate_sources(sources, host_override=host_override)
         profile = self.get_profile(profile_id)
@@ -456,9 +488,8 @@ class RecordingService:
         """
         ffmpeg = self._find_ffmpeg()
         if not ffmpeg:
-            logger.warning("ffmpeg not found — copying source file without transcoding")
-            shutil.copy2(src, dst)
-            return True
+            logger.warning("ffmpeg not found — conversion unavailable; source media retained")
+            return False
 
         cmd: List[str] = [ffmpeg, "-y", "-i", str(src)]
 
@@ -522,102 +553,195 @@ class RecordingService:
             dst.unlink(missing_ok=True)
             return False
 
+    @staticmethod
+    def _file_digest(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for block in iter(lambda: source.read(1 << 20), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
     def export_session(self, session_id: str, *, container: ContainerFormat) -> Path:
-        """
-        Export a recording session as a zip bundle.
+        """Export immutable source bytes, portable metadata and optional derivatives.
 
-        If the session has a registered EncodingProfile, each artifact is
-        transcoded via FFmpeg to the target container/codec before bundling.
-        If FFmpeg is not installed, source files are copied without transcoding
-        (graceful degradation — the zip will still contain the original media).
-
-        Returns the path to the zip bundle.
+        Conversion never replaces the source. Missing media fails the operation;
+        unavailable conversion is described in the manifest. Each request has an
+        independent staging directory and publishes a completed archive atomically.
         """
         session = self.get_session(session_id)
+        if session.state not in {RecordingState.STOPPED, RecordingState.ARCHIVED}:
+            raise ValueError("Stop the recording before exporting immutable media")
+        if not session.artifacts:
+            raise ValueError("No recorded media is available for export")
+        for artifact in session.artifacts:
+            if not artifact.file_path.is_file():
+                raise ValueError(f"Missing recording artifact: {artifact.name}")
         profile = self._profiles.get(session.profile_id)
-        archive_path = self.exports_dir / f"{session_id}.{container.value}.zip"
+        archive_path = self.exports_dir / f"{session_id}.{container.value}.{uuid.uuid4().hex[:12]}.zip"
         metadata_name = f"{session_id}.json"
-        transcode_dir = self.exports_dir / f"{session_id}_transcode"
-
-        try:
-            transcode_dir.mkdir(parents=True, exist_ok=True)
-            with ZipFile(archive_path, "w", ZIP_DEFLATED) as bundle:
-                bundle.writestr(metadata_name, json.dumps(session.to_dict(), indent=2))
-                for artifact in session.artifacts:
-                    if not artifact.file_path.exists():
-                        logger.warning("Artifact missing: %s", artifact.file_path)
-                        continue
-
-                    if profile and self._find_ffmpeg():
-                        # Transcode to target container
-                        out_name = artifact.file_path.stem + f".{container.value}"
-                        out_path = transcode_dir / out_name
-                        # Use a copy of profile with updated container
+        metadata = session.to_dict()
+        metadata["artifacts"] = []
+        manifest = {"schema": "pubcast-recording-export/1", "session_id": session_id,
+                    "requested_container": container.value, "files": {}, "derived": [], "warnings": []}
+        encoder_available = bool(self._find_ffmpeg())
+        if profile is None:
+            manifest["warnings"].append("Encoding profile unavailable: original media preserved; no conversion performed")
+        if not encoder_available:
+            manifest["warnings"].append("FFmpeg unavailable: original media preserved; no conversion performed")
+        with tempfile.TemporaryDirectory(prefix="recording-export-", dir=self.exports_dir) as staging_name:
+            staging = Path(staging_name)
+            pending = staging / "bundle.zip"
+            with ZipFile(pending, "w", ZIP_DEFLATED) as bundle:
+                for index, artifact in enumerate(session.artifacts, 1):
+                    safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", artifact.file_path.name).rstrip(" .") or "source"
+                    source_member = f"media/{index:04d}_{safe_name}"
+                    # Hash the exact bytes being archived, including large sources.
+                    digest, size = hashlib.sha256(), 0
+                    entry = ZipInfo(source_member)
+                    entry.compress_type = ZIP_STORED
+                    with artifact.file_path.open("rb") as source, bundle.open(entry, "w", force_zip64=True) as target:
+                        for block in iter(lambda: source.read(1 << 20), b""):
+                            target.write(block); digest.update(block); size += len(block)
+                    manifest["files"][source_member] = {"sha256": digest.hexdigest(), "bytes": size}
+                    metadata["artifacts"].append({"name": artifact.name, "format": artifact.format.value,
+                                                  "file_path": source_member,
+                                                  "size_bytes": size})
+                    if profile and encoder_available:
+                        name = f"{index:04d}_{Path(safe_name).stem}.{container.value}"
+                        out_path = staging / name
+                        # Select codecs compatible with the requested container,
+                        # without assigning the source any new quality/provenance.
+                        video, audio = {
+                            ContainerFormat.MP4: ("h264", "aac"),
+                            ContainerFormat.WEBM: ("libvpx-vp9", "libopus"),
+                            ContainerFormat.MOV: ("prores_ks", "pcm_s24le"),
+                            ContainerFormat.WAV: (None, "pcm_s16le"),
+                        }[container]
                         export_profile = EncodingProfile(
-                            profile_id=profile.profile_id,
-                            name=profile.name,
-                            container=container,
-                            video_codec=profile.video_codec,
-                            audio_codec=profile.audio_codec,
-                            video_bitrate=profile.video_bitrate,
-                            audio_bitrate=profile.audio_bitrate,
-                            resolution=profile.resolution,
-                            frame_rate=profile.frame_rate,
-                            description=profile.description,
-                            is_audio_only=profile.is_audio_only or container == ContainerFormat.WAV,
-                        )
-                        success = self._transcode_artifact(artifact.file_path, out_path, export_profile)
-                        src_for_bundle = out_path if success and out_path.exists() else artifact.file_path
-                    else:
-                        src_for_bundle = artifact.file_path
-
-                    bundle.write(src_for_bundle, arcname=f"media/{src_for_bundle.name}")
-        finally:
-            # Clean up transcode staging area
-            if transcode_dir.exists():
-                shutil.rmtree(transcode_dir, ignore_errors=True)
-
-        logger.info("Exported session %s to %s", session_id, archive_path)
+                            profile_id=profile.profile_id, name=profile.name, container=container,
+                            video_codec=video, audio_codec=audio, video_bitrate=profile.video_bitrate,
+                            audio_bitrate=profile.audio_bitrate, resolution=profile.resolution,
+                            frame_rate=profile.frame_rate, description=profile.description,
+                            is_audio_only=profile.is_audio_only or container == ContainerFormat.WAV)
+                        if self._transcode_artifact(artifact.file_path, out_path, export_profile) and out_path.is_file():
+                            member = "renders/" + name
+                            bundle.write(out_path, arcname=member, compress_type=ZIP_STORED)
+                            manifest["files"][member] = {"sha256": self._file_digest(out_path), "bytes": out_path.stat().st_size}
+                            manifest["derived"].append({"path": member, "source_member": source_member,
+                                                        "container": container.value, "source_master": False})
+                        else:
+                            manifest["warnings"].append(f"Conversion failed for {artifact.name}; original media preserved")
+                metadata_bytes = json.dumps(metadata, indent=2).encode("utf-8")
+                bundle.writestr(metadata_name, metadata_bytes)
+                manifest["files"][metadata_name] = {"sha256": hashlib.sha256(metadata_bytes).hexdigest(),
+                                                    "bytes": len(metadata_bytes)}
+                bundle.writestr("EXPORT_MANIFEST.json", json.dumps(manifest, indent=2))
+            os.replace(pending, archive_path)
+        logger.info("Exported original media and portable metadata: %s", archive_path)
         return archive_path
 
     def import_session(self, bundle_path: Path) -> RecordingSession:
-        if not bundle_path.exists():
+        """Validate, stage and relink a bundle without overwriting another take."""
+        if not bundle_path.is_file():
             raise FileNotFoundError(bundle_path)
-        with ZipFile(bundle_path, "r") as bundle:
-            metadata_candidates = [name for name in bundle.namelist() if name.endswith(".json")]
-            if not metadata_candidates:
-                raise ValueError("Bundle does not contain metadata")
-            meta_name = metadata_candidates[0]
-            payload = json.loads(bundle.read(meta_name))
-            session_id = self._validated_session_id(
-                payload.get("session_id") or f"rec_{uuid.uuid4().hex[:10]}"
-            )
-            payload["session_id"] = session_id
-            session_dir = self._session_dir(session_id)
-            if session_dir.exists():
-                raise ValueError(f"Session directory already exists for {session_id}")
-            session_dir.mkdir(parents=True, exist_ok=True)
-            for member in bundle.namelist():
-                if member.startswith("media/"):
-                    target = session_dir / Path(member).name
-                    with bundle.open(member) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-            session = self._session_from_dict(payload)
-            session.session_id = session_id
-            self._sessions[session_id] = session
-            self._write_metadata(session)
-            logger.info("Imported recording session %s", session_id)
-            return session
+        created_directory = False
+        session_dir = None
+        try:
+            with ZipFile(bundle_path, "r") as bundle:
+                members = bundle.infolist()
+                names = [item.filename for item in members]
+                if len(names) > 4096 or len({name.casefold() for name in names}) != len(names):
+                    raise ValueError("Recording bundle contains duplicate or excessive entries")
+                limit = int(os.environ.get("PUBCAST_RECORDING_IMPORT_MAX_BYTES", str(64 * 1024 ** 3)))
+                total = sum(item.file_size for item in members)
+                if total > limit or total + 64 * 1024 ** 2 > shutil.disk_usage(self.recordings_dir).free:
+                    raise ValueError("Recording bundle exceeds the available import storage budget")
+                metadata_candidates = [name for name in names if "/" not in name and name.endswith(".json")
+                                       and name != "EXPORT_MANIFEST.json"]
+                if len(metadata_candidates) != 1:
+                    raise ValueError("Bundle must contain one recording metadata file")
+                metadata_name = metadata_candidates[0]
+                if bundle.getinfo(metadata_name).file_size > 8 * 1024 ** 2:
+                    raise ValueError("Recording metadata is too large")
+                payload = json.loads(bundle.read(metadata_name))
+                if not isinstance(payload, dict):
+                    raise ValueError("Invalid recording metadata")
+                session_id = self._validated_session_id(payload.get("session_id"))
+                session_dir = self._session_dir(session_id)
+                if session_dir.exists() or session_id in self._sessions:
+                    raise ValueError(f"Session directory already exists for {session_id}")
+                try:
+                    session = self._session_from_dict(payload)
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ValueError("Invalid recording metadata") from exc
+                media_members = [name for name in names if name.startswith("media/") and not name.endswith("/")]
+                for member in media_members:
+                    leaf = member.removeprefix("media/")
+                    if not leaf or leaf in {".", ".."} or "/" in leaf or "\\" in leaf or ":" in leaf:
+                        raise ValueError("Invalid recording media path")
+                media_names = {Path(name).name for name in media_members}
+                if len(media_names) != len(media_members):
+                    raise ValueError("Duplicate recording media names")
+                if any(artifact.file_path.name not in media_names for artifact in session.artifacts):
+                    raise ValueError("Missing media referenced by recording metadata")
+                manifest = None
+                if "EXPORT_MANIFEST.json" in names:
+                    if bundle.getinfo("EXPORT_MANIFEST.json").file_size > 8 * 1024 ** 2:
+                        raise ValueError("Export integrity manifest is too large")
+                    manifest = json.loads(bundle.read("EXPORT_MANIFEST.json"))
+                    if not isinstance(manifest, dict) or manifest.get("schema") != "pubcast-recording-export/1":
+                        raise ValueError("Unsupported export integrity manifest")
+                    files = manifest.get("files")
+                    if not isinstance(files, dict) or not set(media_members + [metadata_name]).issubset(files):
+                        raise ValueError("Incomplete export integrity manifest")
+                    if not set(files).issubset(names):
+                        raise ValueError("Missing files in export integrity manifest")
+                else:
+                    logger.warning("Importing legacy recording bundle without an integrity manifest")
+                with tempfile.TemporaryDirectory(prefix=".recording-import-", dir=self.recordings_dir) as staging_name:
+                    staging = Path(staging_name)
+                    for member in (list(manifest["files"]) if manifest else media_members):
+                        digest, size = hashlib.sha256(), 0
+                        target = staging / Path(member).name if member in media_members else None
+                        with bundle.open(member) as source:
+                            out = target.open("xb") if target else None
+                            try:
+                                for block in iter(lambda: source.read(1 << 20), b""):
+                                    digest.update(block); size += len(block)
+                                    if out is not None:
+                                        out.write(block)
+                            finally:
+                                if out is not None:
+                                    out.close()
+                        if manifest:
+                            spec = manifest["files"][member]
+                            if not isinstance(spec, dict) or spec.get("sha256") != digest.hexdigest() or spec.get("bytes") != size:
+                                raise ValueError(f"Recording integrity check failed: {member}")
+                    # Reserve the destination exclusively after all validation.
+                    session_dir.mkdir(exist_ok=False)
+                    created_directory = True
+                    for child in staging.iterdir():
+                        child.rename(session_dir / child.name)
+                    for artifact in session.artifacts:
+                        artifact.size_bytes = artifact.file_path.stat().st_size
+                    self._write_metadata(session)
+                self._sessions[session_id] = session
+                return session
+        except Exception:
+            if created_directory and session_dir is not None:
+                shutil.rmtree(session_dir)
+            raise
 
     # ------------------------------------------------------------------
     # Storage & diagnostics
-    def storage_status(self) -> Dict[str, float]:
+    def storage_status(self) -> Dict[str, Any]:
         usage_bytes = sum(
             file.stat().st_size
             for file in self.recordings_dir.glob("**/*")
             if file.is_file()
         )
         self._storage_cache["recorded_gb"] = round(usage_bytes / (1024 ** 3), 2)
+        self._storage_cache["local_free_gb"] = round(shutil.disk_usage(self.recordings_dir).free / (1024 ** 3), 2)
         return self._storage_cache
 
     def set_storage_status(self, **kwargs) -> None:
@@ -650,7 +774,7 @@ class RecordingService:
     # ------------------------------------------------------------------
     def _write_metadata(self, session: RecordingSession) -> None:
         metadata_path = self._session_dir(session.session_id) / f"{session.session_id}.json"
-        metadata_path.write_text(json.dumps(session.to_dict(), indent=2), encoding="utf-8")
+        write_json(metadata_path, session.to_dict())
 
     def _session_from_dict(self, payload: Dict) -> RecordingSession:
         session = RecordingSession(
@@ -665,12 +789,13 @@ class RecordingService:
             started_at=payload.get("started_at", time.time()),
             updated_at=payload.get("updated_at", time.time()),
             ended_at=payload.get("ended_at"),
+            recovery=payload.get("recovery"),
         )
         session.artifacts = [
             RecordingArtifact(
                 name=item["name"],
                 format=ContainerFormat(item["format"]),
-                file_path=self._session_dir(session.session_id) / Path(item["file_path"]).name,
+                file_path=self._session_dir(session.session_id) / Path(str(item["file_path"]).replace("\\", "/")).name,
                 size_bytes=item.get("size_bytes", 0),
             )
             for item in payload.get("artifacts", [])

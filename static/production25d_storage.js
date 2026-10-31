@@ -40,17 +40,18 @@
   if(blob!=null&&!(blob instanceof Blob))return Promise.reject(Error("Invalid recording blob"));
   return transaction("readwrite",blob?["sessions","media"]:["sessions"],(tx)=>{
     tx.objectStore("sessions").put(session);
-    if(blob)tx.objectStore("media").put({id:session.id,blob});
+    if(blob)tx.objectStore("media").put({id:session.media?.id||session.id,sessionId:session.id,blob});
   });
  }
- function read(id){
+ function read(id,takeId){
   return transaction("readonly",["sessions","media"],(tx,done)=>{
-    const result={session:null,blob:null};let count=0;
-    const finish=()=>{if(++count===2)done(result)};
+    const result={session:null,blob:null};
     const q=tx.objectStore("sessions").get(id);
-    q.onsuccess=()=>{result.session=q.result||null;finish()};
-    const m=tx.objectStore("media").get(id);
-    m.onsuccess=()=>{result.blob=m.result?.blob||null;finish()};
+    q.onsuccess=()=>{
+      result.session=q.result||null;
+      const m=tx.objectStore("media").get(takeId||result.session?.media?.id||id);
+      m.onsuccess=()=>{result.blob=m.result?.blob||null;done(result)};
+    };
   });
  }
  function list(){

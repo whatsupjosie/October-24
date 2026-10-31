@@ -20,6 +20,9 @@
 */
 (function(root){
   'use strict';
+  // Files supplies a cryptographically random UUID even on plain local HTTP,
+  // where randomUUID is unavailable but getRandomValues is supported.
+  const newId=()=>root.ForesightFiles?.newId?root.ForesightFiles.newId():crypto.randomUUID();
 
   const DEFAULT_CONFIG = {
     // PubPartner's canonical full-host spine lives inside Reach; pubpartnerBase may point at a deliberate remote host.
@@ -152,7 +155,7 @@
       const f = el('iframe', Object.assign({allow: 'microphone; camera; autoplay; clipboard-read; clipboard-write; fullscreen', loading: 'eager'}, attrs || {}));
       c.frameLoaded=false;c.appReady=false;
       if(['twoi','file'].includes(c.type)){
-        c.sessionNonce=crypto.randomUUID();
+        c.sessionNonce=newId();
         const url=new URL(src,location.origin);
         if(url.origin!==location.origin)throw Error('2i must be hosted on the authenticated Reach origin');
         url.searchParams.set('foresightSession',c.sessionNonce);
@@ -335,7 +338,7 @@
       const file=files.get(c);
       if(!c.data.fileId){
         if(!file){panel(body,'Choose the file again','No saved file bytes found.',[['Choose file…',()=>pickInto(c)]]);return;}
-        c.data.fileId=crypto.randomUUID();c.host.changed();
+        c.data.fileId=newId();c.host.changed();
       }
       try{
         if(file&&!await ForesightFiles.record(c.data.fileId))await ForesightFiles.record(c.data.fileId,{id:c.data.fileId,name:file.name,mime:file.type,original:file,updated:Date.now()});
@@ -356,7 +359,7 @@
       }
       if(c.frame!==frame||c.stopped||!c.appReady)throw Error('2i editor was replaced or did not initialize');
       return new Promise((resolve,reject)=>{
-        const requestId=crypto.randomUUID();
+        const requestId=newId();
         const timer=setTimeout(()=>{fileCommands.delete(requestId);reject(Error('2i did not acknowledge '+command+' within the deadline'))},15000);
         fileCommands.set(requestId,{resolve,reject,timer,source:frame.contentWindow,content:c});
         frame.contentWindow.postMessage({type:'foresight:file-command',version:1,
@@ -426,7 +429,7 @@
       const kind = fileKind(file.name, file.type);
       // Unknown types still retain their original and try the strict text fallback.
 
-      const data = {name:file.name,mime:file.type||'',fileId:crypto.randomUUID()};
+      const data = {name:file.name,mime:file.type||'',fileId:newId()};
       pendingFiles.set(data, file);
       if(kind==='video')data.type='file';
       return {type:kind==='video'?'video':'file',data};
@@ -564,7 +567,7 @@
         }
         c.frameLoaded=false;c.appReady=false;c.activityRequest=null;
         c.readyPromise=new Promise(resolve=>{c.resolveReady=resolve});
-        c.sessionNonce=crypto.randomUUID();
+        c.sessionNonce=newId();
         const url=new URL(c.type==='file'
           ? '/writers-room?file='+encodeURIComponent(c.data.fileId)
           : urlOf(p),location.origin);

@@ -81,7 +81,8 @@ function findClip(clips, re) { return clips.find(c => re.test(c.name)) || null; 
    while the avatar moves. Other rigs keep the established bob/sway fallback. */
 function makeBipedGait(root) {
   const names = ["LeftUpLeg", "RightUpLeg", "LeftArm", "RightArm"];
-  const bones = names.map(n => root.getObjectByName("mixamorig:" + n));
+  // GLTFLoader sanitizes ':' out of node names for animation bindings.
+  const bones = names.map(n => root.getObjectByName("mixamorig:" + n) || root.getObjectByName("mixamorig" + n));
   if (!bones[0] || !bones[1]) return null;
   return bones.map(b => b ? { bone: b, x: b.rotation.x } : null);
 }
@@ -135,9 +136,19 @@ async function load(character, url, label) {
 }
 
 function dispose(inst) {
-  inst.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  const geometries = new Set(), materials = new Set(), textures = new Set();
+  inst.group.traverse(o => {
+    if (o.geometry) geometries.add(o.geometry);
+    for (const material of inst.normalMaterials.get(o) ? [].concat(inst.normalMaterials.get(o)) : []) {
+      materials.add(material);
+      for (const value of Object.values(material)) if (value?.isTexture) textures.add(value);
+    }
+  });
+  for (const texture of textures) texture.dispose();
+  for (const material of materials) material.dispose();
+  for (const geometry of geometries) geometry.dispose();
   if (inst.holo) inst.holo.dispose();
-  if (inst.mixer) inst.mixer.stopAllAction();
+  if (inst.mixer) { inst.mixer.stopAllAction(); inst.mixer.uncacheRoot(inst.group); }
 }
 function clear(character) { const i = avatars.get(character); if (i) { dispose(i); avatars.delete(character); } }
 function has(character) { return avatars.has(character); }
@@ -161,27 +172,31 @@ function draw(ctx, character, cx, fy, H, motion) {
   inst.group.rotation.y = inst.yaw;
   // walk / idle cross-fade, or a small bob and lean when the file has no clips
   inst.wWalk += ((moving ? 1 : 0) - inst.wWalk) * Math.min(1, BLEND_RATE * dt);
+  // A gesture is real rig animation even on bodies without Walk/Idle clips.
+  // Advance the mixer independently of the procedural gait branch.
+  if (inst.activeGesture) {
+    inst.activeGesture.elapsed += dt;
+    if (inst.activeGesture.elapsed >= inst.activeGesture.duration) {
+      inst.activeGesture.action.stop();
+      inst.activeGesture = null;
+    }
+  }
+  const gesturing = !!inst.activeGesture;
+  if (inst.mixer) {
+    if (inst.actions.walk) inst.actions.walk.setEffectiveWeight(gesturing ? 0 : (inst.actions.idle ? inst.wWalk : 1));
+    if (inst.actions.idle) inst.actions.idle.setEffectiveWeight(gesturing ? 0 : (inst.actions.walk ? 1 - inst.wWalk : 1));
+    if (inst.actions.walk && !inst.actions.idle) inst.actions.walk.paused = !moving;
+    inst.mixer.update(dt);
+  }
   if (inst.gait) {
     inst.phase += dt * (moving ? 8 : 1.4);
     const swing = Math.sin(inst.phase) * 0.33 * inst.wWalk;
     // Thighs swing in opposition; arms counter-swing at a smaller amplitude.
     const amounts = [swing, -swing, -swing * 0.65, swing * 0.65];
-    inst.gait.forEach((g, i) => { if (g) g.bone.rotation.x = g.x + amounts[i]; });
+    if (!gesturing) inst.gait.forEach((g, i) => { if (g) g.bone.rotation.x = g.x + amounts[i]; });
     inst.group.position.y = Math.abs(Math.sin(inst.phase)) * 0.012 * inst.wWalk;
     inst.group.rotation.z = 0;
   } else if (inst.mixer && (inst.actions.walk || inst.actions.idle)) {
-    const gesturing = !!inst.activeGesture;
-    if (inst.actions.walk) inst.actions.walk.setEffectiveWeight(gesturing ? 0 : (inst.actions.idle ? inst.wWalk : 1));
-    if (inst.actions.idle) inst.actions.idle.setEffectiveWeight(gesturing ? 0 : (inst.actions.walk ? 1 - inst.wWalk : 1));
-    if (gesturing) {
-      inst.activeGesture.elapsed += dt;
-      if (inst.activeGesture.elapsed >= inst.activeGesture.duration) {
-        inst.activeGesture.action.stop();
-        inst.activeGesture = null;
-      }
-    }
-    if (inst.actions.walk && !inst.actions.idle) inst.actions.walk.paused = !moving;
-    inst.mixer.update(dt);
     inst.group.position.y = 0;
   } else {
     inst.phase += dt * (moving ? 9 : 1.4);

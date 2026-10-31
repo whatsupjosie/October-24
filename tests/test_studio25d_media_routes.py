@@ -6,6 +6,10 @@ files must be executed in a full checkout; mere presence is not a pass.
 from __future__ import annotations
 
 import base64
+import asyncio
+
+import httpx
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -17,10 +21,13 @@ from modules.studio25d_media_routes import (
 )
 
 JPEG = base64.b64decode(
-    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABIMDRANCxIQDhAUExIVGywdGxgYGzYnKSAsQDlEQz85Pj1HUGZXR0thTT0+WXlaYWltcnNyRVV9hnxvhWZwcm7/"
-    "2wBDARMUFBsXGzQdHTRuST5Jbm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm7/wAARCABAAEADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAT/"
-    "xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAME/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AkAaEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH/2Q=="
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABIMDRANCxIQDhAUExIVGywdGxgYGzYnKSAsQDlEQz85Pj1HUGZXR0thTT0+WXlaYWlt"
+    "cnNyRVV9hnxvhWZwcm7/2wBDARMUFBsXGzQdHTRuST5Jbm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5ubm5u"
+    "bm5ubm5ubm7/wAARCABAAEADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAT/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QA"
+    "FgEBAQEAAAAAAAAAAAAAAAAAAAME/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AkAaEAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAH/2Q=="
 )
+
 SOURCE = "p25d_news_wide"
 SESSION = "pubcast25d-test-session-001"
 SECOND = "pubcast25d-test-session-002"
@@ -109,3 +116,32 @@ def test_malformed_media_and_unregistered_sources_are_rejected():
     assert c.post(path, content=JPEG, headers={**h(), "Content-Type": "image/png"}).status_code == 415
     assert c.post("/api/studio25d/media/frames/p25d_unknown_other", content=JPEG, headers=h()).status_code == 404
     assert c.get("/api/studio25d/media/frames/wide_shot", headers=h()).status_code == 400
+
+
+@pytest.mark.parametrize("interruption,expected", [("other_owner", 409), ("same_owner", 429), ("release", 410)])
+async def test_upload_revalidates_lease_after_waiting_for_body(interruption, expected):
+    """A slow upload must not overwrite another publisher or resurrect a release."""
+    c, _ = server()
+    started, resume = asyncio.Event(), asyncio.Event()
+
+    async def delayed_body():
+        yield JPEG[:20]
+        started.set()
+        await resume.wait()
+        yield JPEG[20:]
+
+    path = "/api/studio25d/media/frames/" + SOURCE
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=c.app), base_url="http://test") as client:
+        pending = asyncio.create_task(client.post(path, content=delayed_body(), headers=h()))
+        await started.wait()
+        try:
+            if interruption == "release":
+                result = await client.delete("/api/studio25d/media/sessions/" + SESSION, headers=h())
+            else:
+                competing = h(session=SECOND, actor="other") if interruption == "other_owner" else h()
+                result = await client.post(path, content=JPEG, headers=competing)
+            assert result.status_code == 200, result.text
+        finally:
+            resume.set()
+        response = await pending
+        assert response.status_code == expected, response.text

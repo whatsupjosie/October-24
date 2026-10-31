@@ -28,8 +28,6 @@ def test_world_widgets_render_exchange_messages_and_retry_lost_receipt(tmp_path,
     playwright = pytest.importorskip('playwright.sync_api')
     from bs4 import BeautifulSoup
     chromium = shutil.which('chromium') or shutil.which('chromium-browser')
-    if chromium is None:
-        pytest.skip('Chromium unavailable: browser component gate must run on an equipped device')
     monkeypatch.setenv('PUBCAST_ENFORCE_AUTH', '1')
     hub = Hub(tmp_path)
     app = FastAPI()
@@ -43,8 +41,11 @@ def test_world_widgets_render_exchange_messages_and_retry_lost_receipt(tmp_path,
     )
     fail_once = {'pending': True}
     with playwright.sync_playwright() as runtime:
-        browser = runtime.chromium.launch(headless=True, executable_path=chromium,
-                                           args=['--no-sandbox'])
+        try:
+            browser = runtime.chromium.launch(headless=True,
+                **({'executable_path': chromium} if chromium else {}), args=['--no-sandbox'])
+        except playwright.Error as exc:
+            pytest.skip('Chromium unavailable: ' + str(exc).splitlines()[0])
         try:
             pages = []
             for _name, source in surfaces:

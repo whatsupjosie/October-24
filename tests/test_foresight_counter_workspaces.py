@@ -266,6 +266,18 @@ def test_new_open_request_waits_for_the_current_admission(page):
     assert page.evaluate("!!counter.find('third') && counter.debug.queue()===0")
 
 
+def test_slow_rendering_cannot_block_later_open_requests_indefinitely(page):
+    page.evaluate("openTray('large',{id:'first'});counter.open('large',null,{id:'second'});advance(45)")
+    assert page.evaluate("!!counter.find('second').admitting")
+    page.evaluate("""() => {
+      counter.open('bpm',null,{id:'third'});
+      time+=5000;counter.debug.setClock(time);
+      counter.debug.step();counter.debug.step();
+    }""")
+    assert page.evaluate("!!counter.find('third') && counter.debug.queue()===0")
+    assert page.evaluate("counter.find('second').stack[0].type") == "large"
+
+
 def test_focus_autosaves_without_an_explicit_save_call(page):
     page.evaluate("openTray('keyboard',{id:'keyboard'});openTray('bpm',{id:'bpm'})")
     page.wait_for_timeout(450)

@@ -40,11 +40,10 @@ async function loadRecorderStation() {
 async function refreshStorage() {
   const el = document.getElementById('rec-storage'); if (!el) return;
   try {
-    const s = await fetch('/api/recording/storage').then(r => r.json());
-    el.innerHTML = `Local free: <strong>${s.local_free_gb??'—'} GB</strong> &nbsp;·&nbsp;
-      Recorded: <strong>${s.recorded_gb??0} GB</strong> &nbsp;·&nbsp;
-      Cloud: <strong>${s.cloud_used_gb??'—'} GB</strong> &nbsp;·&nbsp;
-      Backup: <strong>${s.backup_status??'—'}</strong>`;
+    const response = await fetch('/api/recording/storage');
+    if (!response.ok) throw new Error('Storage status HTTP ' + response.status);
+    const s = await response.json();
+    el.textContent = `Local free: ${s.local_free_gb??'—'} GB · Recorded: ${s.recorded_gb??'—'} GB · Cloud: ${s.cloud_used_gb??'—'} GB · Backup: ${s.backup_status??'—'}`;
   } catch(_) { el.innerText = 'Storage info unavailable.'; }
 }
 document.getElementById('rec-storage-refresh')?.addEventListener('click', refreshStorage);

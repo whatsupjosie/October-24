@@ -110,6 +110,19 @@ def create_studio25d_media_router(
             if now - closed_at > LEASE_SECONDS * 2:
                 closed_sessions.pop(key, None)
 
+    def writable_frame(source: str, actor: str, session: str, now: float) -> Frame | None:
+        prune(now)
+        old = frames.get(source)
+        if (actor, session) in closed_sessions:
+            raise HTTPException(410, "This studio session was already released")
+        if old and (old.owner, old.session) != (actor, session):
+            raise HTTPException(409, "Another active studio session owns this camera feed")
+        if old and now - old.timestamp < MIN_FRAME_INTERVAL:
+            raise HTTPException(429, "Frame rate exceeded", headers={"Retry-After": "0.1"})
+        if source not in frames and len(frames) >= MAX_SOURCES:
+            raise HTTPException(503, "Studio confidence feed capacity reached")
+        return old
+
     @router.post("/frames/{source_id}")
     async def publish(source_id: str, request: Request, identity: dict = Depends(operator)):
         camera_exists(source_id)
@@ -118,18 +131,8 @@ def create_studio25d_media_router(
             raise HTTPException(400, "Valid studio session ID required")
         if request.headers.get("content-type", "").split(";")[0].lower() != "image/jpeg":
             raise HTTPException(415, "Only image/jpeg frames are supported")
-        now = clock()
-        prune(now)
-        old = frames.get(source_id)
         actor = str(identity.get("user_id"))
-        if (actor, session) in closed_sessions:
-            raise HTTPException(410, "This studio session was already released")
-        if old and (old.owner, old.session) != (actor, session):
-            raise HTTPException(409, "Another active studio session owns this camera feed")
-        if old and now - old.timestamp < MIN_FRAME_INTERVAL:
-            raise HTTPException(429, "Frame rate exceeded", headers={"Retry-After": "0.1"})
-        if source_id not in frames and len(frames) >= MAX_SOURCES:
-            raise HTTPException(503, "Studio confidence feed capacity reached")
+        writable_frame(source_id, actor, session, clock())
         if request.headers.get("content-length"):
             try:
                 claimed_length = int(request.headers["content-length"])
@@ -146,8 +149,13 @@ def create_studio25d_media_router(
             width, height = jpeg_dimensions(bytes(data))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
+        # Reading a streamed request yields to other publishers and releases.
+        # Revalidate at commit time, without any await before the assignment.
+        camera_exists(source_id)
+        now = clock()
+        old = writable_frame(source_id, actor, session, now)
         sequence = old.sequence + 1 if old else 1
-        frames[source_id] = Frame(bytes(data), clock(), actor, session, sequence, width, height)
+        frames[source_id] = Frame(bytes(data), now, actor, session, sequence, width, height)
         return {"ok": True, "source_id": source_id, "sequence": sequence, "width": width, "height": height}
 
     @router.get("/frames/{source_id}")
