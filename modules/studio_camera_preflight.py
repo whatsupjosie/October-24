@@ -35,6 +35,8 @@ def camera_visibility_report(camera: CameraSource, status: Optional[CameraStatus
 
     if not online:
         issues.append(_issue("camera_offline", "Camera status is offline."))
+    if "studio25d" in camera.tags and str(camera.endpoint).startswith("virtual://"):
+        issues.append(_issue("confidence_only", "2.5D camera has low-rate confidence images but no recordable server media stream."))
     if not str(camera.endpoint or "").strip():
         issues.append(_issue("missing_endpoint", "Camera endpoint is empty."))
     if camera.video_enabled and not (1.0 <= float(camera.fov or 0) <= 180.0):
