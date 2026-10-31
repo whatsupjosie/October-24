@@ -23,7 +23,8 @@ micGain:null,micAnalyser:null,audioDest:null,recordingPromise:null,recordingComp
 recordingMime:"",microphoneMuted:false,microphoneLevel:1,selected:null,playbackUrl:null,downloadUrl:null,
 lastTick:0,blackout:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
 storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0,
-sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null,mediaPublisher:null};
+sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null,mediaPublisher:null,
+avatarGeneration:0,avatarLoadingGeneration:-1,loadedActorIds:new Set()};
 const pr=el.program.getContext("2d"), pv=el.preview.getContext("2d"), prior=lastFrame.getContext("2d");
 function status(message,error){
  el.state.textContent=message;el.state.classList.toggle("error",!!error);
@@ -83,8 +84,15 @@ function refreshCameraUI(){
 function loadGenre(id){
  if(state.session)throw Error("Finish the current production before changing the set");
  const pkg=Core.PACKAGES[id];if(!pkg)throw Error("Unknown package "+id);
- Core.validate(pkg);state.pkg=pkg;
- state.performers=pkg.performers.map(p=>({id:p.id,slot:p.slot,position:p.position.slice(),
+ Core.validate(pkg);
+ // All GLB actor instances belong to ONE current production package.
+ // Clear before replacing; unique IDs prevent an old async loader from
+ // overwriting a new package's actor with the same performer number.
+ state.avatarGeneration++;
+ if(state.avatarBridge?.clear)for(const id of state.loadedActorIds)state.avatarBridge.clear(id);
+ state.loadedActorIds.clear();
+ state.pkg=pkg;
+ state.performers=pkg.performers.map(p=>({id:"p25d-"+pkg.id+"-"+p.id,slot:p.slot,position:p.position.slice(),
  avatar:p.avatar,moving:false,vx:0,vy:0,motionUntil:0}));
  state.programId=pkg.cameras[0].id;state.previewId=pkg.cameras[1].id;
  state.assets=state.assetByPackage[id]||(state.assetByPackage[id]={});
@@ -355,15 +363,22 @@ async function loadActors(){
  const bridge=window.PubCastGLB;
  if(!bridge){el.avatarStatus.textContent="3D GLB engine unavailable; stage rendering continues without substitute actors.";return;}
  state.avatarBridge=bridge;state.avatarError="";
+ const generation=state.avatarGeneration;
+ if(state.avatarLoadingGeneration===generation)return; // avoid double simultaneous loads
+ state.avatarLoadingGeneration=generation;
  const failures=[],loaded=[];
- for(const p of state.performers){
-  if(bridge.has(p.id)){loaded.push(p.id);continue;}
+ for(const p of state.performers.slice()){
+  if(generation!==state.avatarGeneration)break;
+  if(bridge.has(p.id)){loaded.push(p.id);state.loadedActorIds.add(p.id);continue;}
   try{
     const file=p.avatar==="female"?"MakeHuman_Female.glb":"MakeHuman_Male.glb";
     const info=await bridge.load(p.id,"./world/test_avatars/"+file,p.slot);
+    if(generation!==state.avatarGeneration){bridge.clear(p.id);break;}
+    state.loadedActorIds.add(p.id);
     loaded.push(p.id+" ("+info.clips.length+" animations)");
-  }catch(e){failures.push(p.id+": "+e.message);}
+  }catch(e){if(generation===state.avatarGeneration)failures.push(p.id+": "+e.message);}
  }
+ if(generation!==state.avatarGeneration)return;
  el.avatarStatus.textContent="3D GLB actors: "+loaded.join(", ")+(failures.length?" | LOAD FAILED: "+failures.join("; "):"");
  if(failures.length)log("3D ASSET FAILURE "+failures.join("; "));
  else log("3D ACTORS loaded "+loaded.length);
@@ -447,6 +462,9 @@ function initializeControls(){
  window.addEventListener("pagehide",()=>{
    state.mediaPublisher?.stop().catch(()=>{});
    state.sharedSwitcher?.detach();
+   state.avatarGeneration++;
+   for(const id of state.loadedActorIds)state.avatarBridge?.clear?.(id);
+   state.loadedActorIds.clear();
    if(state.recorder&&state.recorder.state==="recording"){try{state.recorder.requestData()}catch(_){}}
  });
  document.addEventListener("pubcast-glb-ready",()=>loadActors());
