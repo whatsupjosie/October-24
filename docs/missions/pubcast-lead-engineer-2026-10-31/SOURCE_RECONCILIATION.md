@@ -102,3 +102,14 @@ items on `October-24`. There are specific differing directories and the
 Three.js vendor path change to audit. **Other old repositories have NOT been
 fully compared or migrated.** Continue source reconciliation alongside the
 primary Control Room/TV engineering work, not instead of it.
+
+## Follow-up inspection — Three.js vendor mismatch
+`static/world_walk.html` actually uses import maps referring to the
+versioned `/static/vendor/three-0.160.0/build/three.module.js`;
+`static/avatar_import.html` and
+`static/js/avatar/avatar_import.js` also reference that versioned path.
+`static/vendor/three-0.160.0/PROVENANCE.json` records the package version
+and source. Thus the renamed vendor tree appears deliberate and consistent
+in the inspected entrypoints. Do **not** restore the old `static/vendor/three`
+directory merely to match old path names. Continue checking any remaining
+dynamic paths/imports in real browser/network tests before marking complete.
