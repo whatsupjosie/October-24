@@ -92,6 +92,8 @@ def create_studio25d_media_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api/studio25d/media", tags=["2.5D Live Confidence Media"])
     frames: dict[str, Frame] = {}
+    # A released session cannot resurrect a stale frame from an in-flight upload.
+    closed_sessions: dict[tuple[str, str], float] = {}
 
     def camera_exists(source: str) -> None:
         if not _SOURCE.fullmatch(source):
@@ -104,6 +106,9 @@ def create_studio25d_media_router(
         for source, entry in list(frames.items()):
             if now - entry.timestamp > LEASE_SECONDS:
                 frames.pop(source, None)
+        for key, closed_at in list(closed_sessions.items()):
+            if now - closed_at > LEASE_SECONDS * 2:
+                closed_sessions.pop(key, None)
 
     @router.post("/frames/{source_id}")
     async def publish(source_id: str, request: Request, identity: dict = Depends(operator)):
@@ -117,6 +122,8 @@ def create_studio25d_media_router(
         prune(now)
         old = frames.get(source_id)
         actor = str(identity.get("user_id"))
+        if (actor, session) in closed_sessions:
+            raise HTTPException(410, "This studio session was already released")
         if old and (old.owner, old.session) != (actor, session):
             raise HTTPException(409, "Another active studio session owns this camera feed")
         if old and now - old.timestamp < MIN_FRAME_INTERVAL:
@@ -173,6 +180,12 @@ def create_studio25d_media_router(
         released = [src for src, frame in list(frames.items()) if (frame.owner, frame.session) == (actor, session_id)]
         for src in released:
             frames.pop(src, None)
+        prune(clock())
+        closed_sessions[(actor, session_id)] = clock()
+        # Bound tombstones even if an operator opens many short sessions.
+        if len(closed_sessions) > 128:
+            oldest = min(closed_sessions, key=closed_sessions.get)
+            closed_sessions.pop(oldest, None)
         return {"ok": True, "released": released}
 
     return router
