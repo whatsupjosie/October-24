@@ -27,9 +27,9 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 </style></head>
 <body>
 <header><strong>PubCast / 2.5D Television Studio</strong>
-<span class="pill" id="mode">LOCAL PRODUCTION</span><span id="state" role="status" aria-live="polite">Initializing</span>
+<span class="pill" id="mode">LOCAL PRODUCTION</span><span class="pill" id="switcherLink" aria-live="polite">VIDEO: LOCAL ONLY</span><span id="state" role="status" aria-live="polite">Initializing</span>
 <span id="timecode">00:00:00</span><a href="./world_walk.html">Walkable studio</a>
-<a href="./control_room.html">Existing Control Room</a>
+<a href="./control_room.html">Existing Control Room</a><a href="./control.html">Shared audio / video mixer</a>
 </header>
 <main>
 <div>
@@ -88,6 +88,8 @@ canvas{touch-action:manipulation}#state{font-weight:700;color:var(--green)}#stat
 <script src="./production25d_core.js"></script>
 <script src="./production25d_renderer.js"></script>
 <script src="./production25d_storage.js"></script>
+<script src="./production25d_switcher_bridge.js"></script>
+<script src="./program_audio_runtime.js"></script>
 <script type="importmap">{"imports":{"three":"./vendor/three-0.160.0/build/three.module.js","three/addons/":"./vendor/three-0.160.0/examples/jsm/"}}</script>
 <script type="module" src="./world_walk_glb.js"></script>
 <script src="./production25d_app.js"></script>
