@@ -77,3 +77,5 @@ python -m pytest -q tests/test_shared_studio_switchers.py
 ```
 
 These commands still require execution on a full local checkout or available CI system.
+
+The production package list now includes a dedicated political roundtable separate from formal debate (eight packages in total). The Director Switcher consults the shared camera registry, including 2.5D sources, rather than treating only its original static five labels as canonical. Its monitor frames still show 'video feed unbound' until real transport integration is verified.
