@@ -39,7 +39,7 @@ from modules.runtime_control_routes import create_runtime_control_router
 from modules.stage_compat_routes import create_stage_compat_router
 from modules.blackbox_runtime import BlackBoxRuntimeWitness
 from modules.studio_camera_preflight import all_camera_visibility, camera_visibility_report, recording_preflight, studio_readiness
-from modules.program_audio import ProgramAudioState
+from modules.program_audio import ProgramAudioState, apply_audio_event
 from modules.program_audio_routes import create_program_audio_router
 from modules.studio_console_actions import execute_studio_action, list_studio_actions
 
