@@ -13,7 +13,7 @@ camera:$("cameras"),performer:$("performer"),recBadge:$("recBadge"),audioBadge:$
 record:$("record"),recordStop:$("recordStop"),start:$("start"),stop:$("stop"),mic:$("mic"),
 micLevel:$("micLevel"),micMute:$("micMute"),micMeter:$("micMeter"),timecode:$("timecode"),
 playback:$("playback"),sessionList:$("sessionList"),manifest:$("manifest"),download:$("download"),
-assetInfo:$("assetInfo"),avatarStatus:$("avatarStatus")};
+assetInfo:$("assetInfo"),avatarStatus:$("avatarStatus"),switcherLink:$("switcherLink")};
 const world=document.createElement("canvas");world.width=Core.W;world.height=Core.H;
 const lastFrame=document.createElement("canvas");lastFrame.width=Core.W;lastFrame.height=Core.H;
 const state={pkg:null,performers:[],assets:{},avatarBridge:null,avatarError:"",
@@ -22,7 +22,8 @@ session:null,media:null,mediaError:null,recorder:null,videoStream:null,micStream
 micGain:null,micAnalyser:null,audioDest:null,recordingPromise:null,recordingComplete:null,recordedChunks:[],
 recordingMime:"",microphoneMuted:false,microphoneLevel:1,selected:null,playbackUrl:null,downloadUrl:null,
 lastTick:0,blackout:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
-storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0};
+storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0,
+sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null};
 const pr=el.program.getContext("2d"), pv=el.preview.getContext("2d"), prior=lastFrame.getContext("2d");
 function status(message,error){
  el.state.textContent=message;el.state.classList.toggle("error",!!error);
@@ -62,7 +63,7 @@ function buildCameras(){
  for(const shot of state.pkg.cameras){
   const btn=document.createElement("button");
   btn.type="button";btn.textContent=shot.label;btn.dataset.shot=shot.id;
-  btn.addEventListener("click",()=>choosePreview(shot.id));
+  btn.addEventListener("click",()=>safe(()=>choosePreview(shot.id)));
   el.camera.appendChild(btn);
  }
  refreshCameraUI();
@@ -97,22 +98,54 @@ function loadGenre(id){
  buildCameras();setControls();log("SET "+pkg.title+" / "+pkg.cameras.length+" camera configurations");
  loadActors();
 }
-function choosePreview(id){
- Core.shot(state.pkg,id);state.previewId=id;refreshCameraUI();
- emit("camera.preview",{id});log("PREVIEW "+id);
+async function choosePreview(id){
+ Core.shot(state.pkg,id);
+ if(state.sharedSwitcher?.connected()){
+   await state.sharedSwitcher.choosePreview(id);
+ } else {
+   state.previewId=id;refreshCameraUI();
+ }
+ emit("camera.preview",{id,shared:!!state.sharedSwitcher?.connected()});log("PREVIEW "+id);
 }
 function makeTransition(){
  prior.clearRect(0,0,Core.W,Core.H);
  prior.drawImage(el.program,0,0,Core.W,Core.H);
  state.transition={started:performance.now(),duration:600};
 }
-function cut(dissolve){
- if(!state.pkg)return;
- const old=state.programId;
- if(dissolve)makeTransition();else state.transition=null;
- state.programId=state.previewId;state.previewId=old;
- emit(dissolve?"camera.dissolve":"camera.cut",{from:old,to:state.programId,durationMs:dissolve?600:0});
- refreshCameraUI();log((dissolve?"DISSOLVE ":"CUT ")+old+" → "+state.programId);
+async function cut(dissolve){
+ if(!state.pkg||!state.session)throw Error("Start production before switching Program");
+ const old=state.programId, wanted=state.previewId;
+ if(state.sharedSwitcher?.connected()){
+   // The same canonical switcher operates the studio; never take locally on HTTP failure.
+   if(dissolve)makeTransition();
+   try { await state.sharedSwitcher.take(!!dissolve); }
+   catch(e) {state.transition=null;throw e;}
+ } else {
+   if(dissolve)makeTransition();else state.transition=null;
+   state.programId=wanted;state.previewId=old;
+   refreshCameraUI();
+ }
+ emit(dissolve?"camera.dissolve":"camera.cut",{from:old,to:state.programId,durationMs:dissolve?600:0,shared:!!state.sharedSwitcher?.connected()});
+ log((dissolve?"DISSOLVE ":"CUT ")+old+" → "+state.programId);
+}
+function sharedSwitcherState(next) {
+ if(!state.session)return;
+ state.remoteProgram=next.remoteProgram;
+ state.remotePreview=next.remotePreview;
+ if(next.program)state.programId=next.program;
+ if(next.preview)state.previewId=next.preview;
+ refreshCameraUI();
+ if(next.remoteProgram) {
+   log("SHARED PROGRAM SOURCE OUTSIDE 2.5D PACKAGE: "+next.remoteProgram);
+ } else {
+   emit("camera.shared_state",{program:state.programId,preview:state.previewId,transition:next.transition});
+ }
+}
+function sharedSwitcherWarning(reason) {
+ if(!state.session)return;
+ el.switcherLink.textContent="VIDEO SYNC LOST";
+ el.switcherLink.style.color="#ff8b8b";
+ error(reason);
 }
 function cue(type,payload){
  emit("cue."+type,payload||{});log("CUE "+type+(payload?.performer?" "+payload.performer:""));
@@ -143,6 +176,19 @@ async function startProduction(){
  emit("production.start",{package:state.pkg.id,program:state.programId});
  try{if(state.storageReady)await Store.save(sess)}catch(e){state.session=null;throw Error("Cannot persist session start: "+e.message);}
  log("PRODUCTION START "+sess.id);setControls();
+ state.remoteProgram=null;state.remotePreview=null;
+ const Shared=window.PubCast25DSharedSwitcher;
+ if(Shared){
+   const bridge=Shared.create({onState:sharedSwitcherState,onError:sharedSwitcherWarning});
+   const result=await bridge.attach(state.pkg);
+   state.sharedSwitcher=bridge;
+   el.switcherLink.textContent=result.shared?"VIDEO: SHARED SWITCHER":"VIDEO: LOCAL ONLY";
+   el.switcherLink.style.color=result.shared?"#79e9b0":"#efd18b";
+   log(result.shared?"SHARED SWITCHER ATTACHED: "+result.sourceCount+" stage cameras":"LOCAL VIDEO MODE: "+result.reason);
+ }else{
+   el.switcherLink.textContent="VIDEO: LOCAL ONLY";
+   log("Shared switcher adapter unavailable; local-only production");
+ }
 }
 async function stopProduction(){
  if(!state.session)return;
@@ -151,6 +197,9 @@ async function stopProduction(){
  emit("production.stop",{});
  Core.finish(sess,Date.now());
  if(state.storageReady)await Store.save(sess);
+ state.sharedSwitcher?.detach();state.sharedSwitcher=null;
+ state.remoteProgram=null;state.remotePreview=null;
+ el.switcherLink.textContent="VIDEO: LOCAL ONLY";
  state.session=null;log("PRODUCTION END "+sess.id);setControls();await refreshSessions();
 }
 function recordedMime(){
@@ -296,6 +345,16 @@ function frame(now){
   Render.renderCamera(pr,pkg,Core.shot(pkg,state.programId),state,world,dt);
   const previewState=Object.assign({},state,{blackout:false,lowerThird:false});
   Render.renderCamera(pv,pkg,Core.shot(pkg,state.previewId),previewState,world,0);
+  if(state.remoteProgram){
+    pr.fillStyle="#000";pr.fillRect(0,0,Core.W,Core.H);
+    pr.fillStyle="#ff8b8b";pr.font="bold 28px system-ui";pr.textAlign="center";
+    pr.fillText("EXTERNAL PROGRAM SOURCE — NO LOCAL VIDEO FEED",Core.W/2,Core.H/2);
+  }
+  if(state.remotePreview){
+    pv.fillStyle="#000";pv.fillRect(0,0,Core.W,Core.H);
+    pv.fillStyle="#ff8b8b";pv.font="bold 28px system-ui";pv.textAlign="center";
+    pv.fillText("EXTERNAL PREVIEW SOURCE — NO LOCAL VIDEO FEED",Core.W/2,Core.H/2);
+  }
   if(state.transition){
    const f=1-(now-state.transition.started)/state.transition.duration;
    if(f>0){pr.globalAlpha=Math.min(1,Math.max(0,f));pr.drawImage(lastFrame,0,0);pr.globalAlpha=1;}
@@ -346,7 +405,10 @@ function initializeControls(){
  el.micMute.addEventListener("click",()=>{state.microphoneMuted=!state.microphoneMuted;if(state.micGain)state.micGain.gain.value=state.microphoneMuted?0:state.microphoneLevel;setControls();emit("audio.mic_mute",{muted:state.microphoneMuted})});
  el.download.addEventListener("click",()=>safe(()=>{if(state.selected?.blob)downloadBlob(state.selected.blob,state.selected.session.id+"."+(/mp4/.test(state.selected.blob.type)?"mp4":"webm"))}));
  el.manifest.addEventListener("click",()=>safe(()=>{if(state.selected?.session)downloadBlob(new Blob([JSON.stringify(state.selected.session,null,2)],{type:"application/json"}),state.selected.session.id+".json")}));
- window.addEventListener("pagehide",()=>{if(state.recorder&&state.recorder.state==="recording"){try{state.recorder.requestData()}catch(_){}}});
+ window.addEventListener("pagehide",()=>{
+   state.sharedSwitcher?.detach();
+   if(state.recorder&&state.recorder.state==="recording"){try{state.recorder.requestData()}catch(_){}}
+ });
  document.addEventListener("pubcast-glb-ready",()=>loadActors());
 }
 async function init(){
