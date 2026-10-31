@@ -13,7 +13,7 @@ camera:$("cameras"),performer:$("performer"),recBadge:$("recBadge"),audioBadge:$
 record:$("record"),recordStop:$("recordStop"),start:$("start"),stop:$("stop"),mic:$("mic"),
 micLevel:$("micLevel"),micMute:$("micMute"),micMeter:$("micMeter"),timecode:$("timecode"),
 playback:$("playback"),sessionList:$("sessionList"),manifest:$("manifest"),download:$("download"),
-assetInfo:$("assetInfo"),avatarStatus:$("avatarStatus"),switcherLink:$("switcherLink")};
+assetInfo:$("assetInfo"),avatarStatus:$("avatarStatus"),switcherLink:$("switcherLink"),liveMedia:$("liveMedia")};
 const world=document.createElement("canvas");world.width=Core.W;world.height=Core.H;
 const lastFrame=document.createElement("canvas");lastFrame.width=Core.W;lastFrame.height=Core.H;
 const state={pkg:null,performers:[],assets:{},avatarBridge:null,avatarError:"",
@@ -23,7 +23,7 @@ micGain:null,micAnalyser:null,audioDest:null,recordingPromise:null,recordingComp
 recordingMime:"",microphoneMuted:false,microphoneLevel:1,selected:null,playbackUrl:null,downloadUrl:null,
 lastTick:0,blackout:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
 storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0,
-sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null};
+sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null,mediaPublisher:null};
 const pr=el.program.getContext("2d"), pv=el.preview.getContext("2d"), prior=lastFrame.getContext("2d");
 function status(message,error){
  el.state.textContent=message;el.state.classList.toggle("error",!!error);
@@ -185,6 +185,21 @@ async function startProduction(){
    el.switcherLink.textContent=result.shared?"VIDEO: SHARED SWITCHER":"VIDEO: LOCAL ONLY";
    el.switcherLink.style.color=result.shared?"#79e9b0":"#efd18b";
    log(result.shared?"SHARED SWITCHER ATTACHED: "+result.sourceCount+" stage cameras":"LOCAL VIDEO MODE: "+result.reason);
+   if(result.shared&&window.PubCast25DFramePublisher){
+     state.mediaPublisher=window.PubCast25DFramePublisher.create({
+       session:sess.id,sourceId:id=>Shared.sourceId(state.pkg.id,id),
+       onState:feed=>{
+         el.liveMedia.textContent=feed.live?"REMOTE FRAMES: CONFIRMED ("+feed.frames+")":"REMOTE FRAMES: OFF";
+         el.liveMedia.style.color=feed.live?"#79e9b0":"";
+       },
+       onError:(reason,count)=>{
+         if(count===1||count===3||count%10===0){
+           el.liveMedia.textContent="REMOTE FRAMES: ERROR";
+           el.liveMedia.style.color="#ff8b8b";log(reason);
+         }
+       }
+     });
+   }
  }else{
    el.switcherLink.textContent="VIDEO: LOCAL ONLY";
    log("Shared switcher adapter unavailable; local-only production");
@@ -197,9 +212,14 @@ async function stopProduction(){
  emit("production.stop",{});
  Core.finish(sess,Date.now());
  if(state.storageReady)await Store.save(sess);
+ if(state.mediaPublisher){
+   try{await state.mediaPublisher.stop()}catch(e){log("LIVE MEDIA RELEASE WARNING "+e.message)}
+   state.mediaPublisher=null;
+ }
  state.sharedSwitcher?.detach();state.sharedSwitcher=null;
  state.remoteProgram=null;state.remotePreview=null;
  el.switcherLink.textContent="VIDEO: LOCAL ONLY";
+ el.liveMedia.textContent="REMOTE FRAMES: OFF";el.liveMedia.style.color="";
  state.session=null;log("PRODUCTION END "+sess.id);setControls();await refreshSessions();
 }
 function recordedMime(){
@@ -369,6 +389,11 @@ function frame(now){
     pv.fillStyle="#ff8b8b";pv.font="bold 28px system-ui";pv.textAlign="center";
     pv.fillText("EXTERNAL PREVIEW SOURCE — NO LOCAL VIDEO FEED",Core.W/2,Core.H/2);
   }
+  if(state.mediaPublisher&&state.sharedSwitcher?.connected()){
+   if(!state.remoteProgram)state.mediaPublisher.publish(state.programId,el.program).catch(e=>log("PROGRAM PUBLISH ERROR "+e.message));
+   if(!state.remotePreview&&state.previewId!==state.programId)
+     state.mediaPublisher.publish(state.previewId,el.preview).catch(e=>log("PREVIEW PUBLISH ERROR "+e.message));
+  }
   if(state.transition){
    const f=1-(now-state.transition.started)/state.transition.duration;
    if(f>0){pr.globalAlpha=Math.min(1,Math.max(0,f));pr.drawImage(lastFrame,0,0);pr.globalAlpha=1;}
@@ -420,6 +445,7 @@ function initializeControls(){
  el.download.addEventListener("click",()=>safe(()=>{if(state.selected?.blob)downloadBlob(state.selected.blob,state.selected.session.id+"."+(/mp4/.test(state.selected.blob.type)?"mp4":"webm"))}));
  el.manifest.addEventListener("click",()=>safe(()=>{if(state.selected?.session)downloadBlob(new Blob([JSON.stringify(state.selected.session,null,2)],{type:"application/json"}),state.selected.session.id+".json")}));
  window.addEventListener("pagehide",()=>{
+   state.mediaPublisher?.stop().catch(()=>{});
    state.sharedSwitcher?.detach();
    if(state.recorder&&state.recorder.state==="recording"){try{state.recorder.requestData()}catch(_){}}
  });
