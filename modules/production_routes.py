@@ -305,8 +305,8 @@ def create_production_router(
         if not pgm or not pvw:
             raise HTTPException(400, "Both program and preview must be set to cut.")
 
-        cameras.set_program_source(pvw.source_id)
-        cameras.set_preview_source(pgm.source_id)
+        if not cameras.take():
+            raise HTTPException(409, "Camera cut could not complete")
 
         _blackbox_event("broadcast.program_frame", source="recorder", actor=str(identity.get("user_id") or "director"), data={"camera_action": "cut", "program": pvw.source_id, "preview": pgm.source_id})
 
