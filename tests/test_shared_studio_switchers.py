@@ -97,3 +97,11 @@ def test_atomic_activation_route_is_authorized_and_rejects_partial_ids(monkeypat
         assert c.get("/api/switcher/state").json() == before
         response = c.post(endpoint, json=pair, headers=header())
         assert response.status_code == 200 and response.json()["preview"] == "close_up"
+def test_production_video_cues_survive_hub_persistence(tmp_path):
+    from modules.hub import Hub
+    hub = Hub(tmp_path)
+    cue = {"panic_seq": 1000.125, "blackout": True, "blackout_seq": 1000.125,
+           "preview_bars": True, "preview_bars_seq": 999.75}
+    hub.update_production_state(cue)
+    persisted = Hub(tmp_path).get_production_state()
+    assert {key: persisted[key] for key in cue} == cue

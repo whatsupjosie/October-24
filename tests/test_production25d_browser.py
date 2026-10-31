@@ -283,3 +283,34 @@ def test_recorder_error_preserves_available_media_as_incomplete(studio):
     }""")
     assert result["incomplete"] is True and result["bytes"] > 1000
     assert "INCOMPLETE" in page.locator("#sessionList").inner_text()
+
+
+def test_remote_panic_stops_real_capture_blacks_program_and_silences_audio(studio, production_server):
+    page, _ = studio
+    wait_for_actors(page)
+    page.click("#start")
+    page.wait_for_function("document.querySelector('#switcherLink').textContent === 'VIDEO: SHARED SWITCHER'")
+    page.click("#record")
+    page.wait_for_function("PubCast25DStudio.state().recording")
+    page.evaluate("""() => {
+      const audio=PubcastProgramAudio, ctx=audio.context;
+      const osc=ctx.createOscillator();osc.frequency.value=440;
+      window.panicAnalyser=ctx.createAnalyser();panicAnalyser.fftSize=512;
+      audio.master.connect(panicAnalyser);osc.connect(audio.master);osc.start();
+      window.panicTone=osc;
+      window.panicRMS=()=>{
+        const values=new Float32Array(512);panicAnalyser.getFloatTimeDomainData(values);
+        return Math.sqrt(values.reduce((sum,value)=>sum+value*value,0)/values.length);
+      };
+    }""")
+    page.wait_for_function("panicRMS() > .1")
+    page.wait_for_timeout(1100)
+    _, auth, api = production_server
+    response = api.post("/api/production/panic", headers={"Authorization": "Bearer " + auth["access_token"]})
+    assert response.status_code == 200 and response.json()["ok"] is True
+    page.wait_for_function("!PubCast25DStudio.state().recording")
+    page.wait_for_function("panicRMS() < .00001")
+    page.wait_for_function("program.getContext('2d').getImageData(640,360,1,1).data.slice(0,3).every(x=>x===0)")
+    assert "PANIC" in page.locator("#state").inner_text()
+    assert page.evaluate("async () => ((await PubCast25DStore.list())[0].media.bytes > 1000)")
+    page.evaluate("panicTone.stop()")

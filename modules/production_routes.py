@@ -692,6 +692,8 @@ def create_production_router(
                 "camera": "black",
                 "lower_third": "",
                 "panic_seq": now,
+                "blackout": True,
+                "blackout_seq": now,
             })
             await hub.broadcast_system_event({
                 "type": "production_panic",

@@ -11,7 +11,7 @@ def test_reload_requires_editor_close_handshake_and_rotates_session():
     assert 'await prepareClose(c)' in function
     assert 'if(!decision.canClose)' in function
     assert "c.type==='file'" in function
-    assert 'c.sessionNonce=crypto.randomUUID()' in function
+    assert 'c.sessionNonce=newId()' in function
     assert "url.searchParams.set('foresightSession',c.sessionNonce)" in function
     assert 'pending.reject(' in function
 
@@ -24,6 +24,7 @@ const assert=require('node:assert/strict');
 const {URL}=require('node:url');
 const location={origin:'http://localhost:8080'};
 const crypto={randomUUID:()=> 'new-nonce'};
+const newId=()=>crypto.randomUUID();
 const fileCommands=new Map();
 const messages=[];
 const toast=x=>messages.push(x);

@@ -26,6 +26,13 @@ class ProductionState(BaseModel):
     lower_third: str = ""
     camera: str = "wide"         # 'wide' | 'closeup' | 'overhead'
     lighting: str = "normal"     # 'normal' | 'warm' | 'cool'
+    # These cues cross the persisted Hub boundary. Without explicit fields,
+    # Pydantic drops them and an acknowledged PANIC never reaches stage pages.
+    panic_seq: float = Field(default=0, ge=0, allow_inf_nan=False)
+    blackout: bool = False
+    blackout_seq: float = Field(default=0, ge=0, allow_inf_nan=False)
+    preview_bars: bool = False
+    preview_bars_seq: float = Field(default=0, ge=0, allow_inf_nan=False)
 
 
 class UserState(BaseModel):

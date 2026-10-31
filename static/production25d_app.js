@@ -22,7 +22,7 @@ session:null,media:null,mediaError:null,recorder:null,videoStream:null,micStream
 micGain:null,micAnalyser:null,audioDest:null,recordingPromise:null,recordingComplete:null,recordedChunks:[],
 recordingStartedAt:0,recordingId:null,recovery:null,
 recordingMime:"",microphoneMuted:false,microphoneLevel:1,selected:null,playbackUrl:null,downloadUrl:null,
-lastTick:0,blackout:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
+lastTick:0,blackout:false,panicActive:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
 storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0,
 sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null,mediaPublisher:null,
 avatarGeneration:0,avatarLoadingGeneration:-1,loadedActorIds:new Set(),
@@ -60,8 +60,9 @@ function setControls(){
  el.audioBadge.textContent=state.micStream?"MIC "+(state.microphoneMuted?"MUTED":"ACTIVE"):"MIC OFF";
  el.micMute.disabled=!state.micStream;
  el.micLevel.disabled=!state.micStream;
- if(!active&&el.state.textContent!=="ATTENTION")status("STANDBY");
- else if(active&&el.state.textContent!=="ATTENTION")status(rec?"RECORDING":"ON AIR");
+ if(active&&state.panicActive)status("PANIC: BLACKOUT",true);
+ else if(!active&&el.state.textContent!=="ATTENTION")status("STANDBY");
+ else if(active&&el.state.textContent!=="ATTENTION")status(state.blackout?"BLACKOUT":rec?"RECORDING":"ON AIR");
 }
 function buildCameras(){
  el.camera.replaceChildren();
@@ -100,7 +101,7 @@ function loadGenre(id){
  avatar:p.avatar,moving:false,vx:0,vy:0,motionUntil:0}));
  state.programId=pkg.cameras[0].id;state.previewId=pkg.cameras[1].id;
  state.assets=state.assetByPackage[id]||(state.assetByPackage[id]={});
- state.blackout=false;state.lowerThird=false;state.lowerText=pkg.graphics;
+ state.blackout=false;state.panicActive=false;state.lowerThird=false;state.lowerText=pkg.graphics;
  state.scores=[0,0];state.transition=null;
  el.description.textContent=pkg.title+" · "+pkg.subtitle+" — "+pkg.cameras.length+" preset shots";
  el.genre.value=id;el.performer.replaceChildren();
@@ -191,7 +192,7 @@ async function syncServerVideoCues(){
    if(!remote||typeof remote!=="object")return;
    const panicSeq=Number(remote.panic_seq)||0;
    if(panicSeq>state.lastPanicSeq&&panicSeq>Date.parse(state.session.startedAt)/1000){
-     state.lastPanicSeq=panicSeq;state.blackout=true;
+     state.lastPanicSeq=panicSeq;state.blackout=true;state.panicActive=true;
      cue("remote_panic",{panicSeq});
      status("PANIC: BLACKOUT");
      if(state.recorder)await stopRecording();
@@ -201,6 +202,7 @@ async function syncServerVideoCues(){
      state.lastBlackoutSeq=blackSeq;
      if(blackSeq>state.lastPanicSeq){
        state.blackout=remote.blackout===true;
+       if(!state.blackout)state.panicActive=false;
        cue("remote_blackout",{enabled:state.blackout});
      }
    }
@@ -209,6 +211,7 @@ async function syncServerVideoCues(){
      state.lastBarsSeq=barsSeq;state.previewBars=remote.preview_bars===true;
      cue("preview_bars",{enabled:state.previewBars});
    }
+   setControls();
  }catch(e){if(state.sharedSwitcher?.connected())log("VIDEO CUE POLL ERROR "+e.message);}
  finally{state.cuePollBusy=false;}
 }
@@ -541,7 +544,8 @@ function initializeControls(){
      if(!result?.ok)throw Error("Shared blackout was not confirmed");
      state.lastBlackoutSeq=Number(result.blackout_seq)||state.lastBlackoutSeq;
    }
-   state.blackout=enabled;cue("blackout",{enabled,shared:!!state.sharedSwitcher?.connected()});
+   state.blackout=enabled;if(!enabled)state.panicActive=false;
+   setControls();cue("blackout",{enabled,shared:!!state.sharedSwitcher?.connected()});
  }));
  $("scoreLeft").addEventListener("click",()=>safe(()=>{state.scores[0]++;cue("score",{contestant:0,value:state.scores[0]})}));
  $("scoreRight").addEventListener("click",()=>safe(()=>{state.scores[1]++;cue("score",{contestant:1,value:state.scores[1]})}));
