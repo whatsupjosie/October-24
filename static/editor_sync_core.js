@@ -149,7 +149,10 @@
    if(p.clackerIntervalUs!==INTERVAL_US)throw Error("Unsupported clacker interval");
    if(!Array.isArray(p.tracks)||p.tracks.length>32||!Array.isArray(p.selections)||p.selections.length>10000)throw Error("Invalid project collections");
    const ids=new Set();
-   for(const t of p.tracks){validateTrack(t);if(ids.has(t.id))throw Error("Duplicate track");ids.add(t.id);}
+   for(const t of p.tracks){
+     validateTrack(t);if(ids.has(t.id))throw Error("Duplicate track");ids.add(t.id);
+     alignment(p,t); // Reject incoherent multi-mark clocks before saving a project.
+   }
    const selectIds=new Set();
    let assembledDurationUs=0;
    for(const s of p.selections){
@@ -230,6 +233,7 @@
    const i=p.selections.findIndex(x=>x.id===selectionId);
    if(i<0)throw Error("Selected clip missing");
    const s=p.selections[i],duration=s.kind==="gap"?s.durationUs:s.outUs-s.inUs;
+   if(!ripple&&s.kind==="gap")throw Error("A blank interval cannot be lifted into another blank; use Ripple Delete or Close Gaps");
    if(ripple)p.selections.splice(i,1);
    else p.selections.splice(i,1,{id:id("lift-"+s.id+"-"+(p.revision+1),"lift ID"),kind:"gap",durationUs:duration});
    validateProject(p);touch(p);return {durationUs:duration,ripple};
