@@ -720,7 +720,8 @@ let backendTruth = {
 };
 
 const $ = (id) => document.getElementById(id);
-const cameraById = (id) => cameras.find(c => c.id === id) || cameras[0];
+const cameraById = (id) => cameras.find(c => c.id === id)
+  || {id:"unavailable",sourceId:null,label:"NO VERIFIED CAMERA",shot:"UNAVAILABLE"};
 // Real media is deliberately separate from canonical Program/Preview state.
 function createRemoteViewer(){
   if(!window.PubCast25DRemoteFeed)return null;
@@ -1002,6 +1003,8 @@ async function fade(){
 
 async function toggleRecord(btn) {
   if (!recording) {
+    const camera=cameraById(program);
+    if(!camera.sourceId){toast("NO VERIFIED CAMERA");log("Recording denied: no live Program source");return;}
     const sessionId = `director_${Date.now()}`;
     const started = await runStudioAction("recording.start", {
       session_id: sessionId,
