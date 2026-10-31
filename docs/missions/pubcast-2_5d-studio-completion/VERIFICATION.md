@@ -13,3 +13,11 @@ Execution method: fetched current integration-branch JavaScript source through t
 **Not executed:** pytest and Node test files added to repository (require a local or CI run), browser MediaRecorder capture, actual three.js avatar rendering in production studio, audio across tabs, server switcher route on actual FastAPI runtime. Do not mislabel mock checks as real integration results.
 
 Further isolated V8 checks (not browser runtime): latest studio core validated eight distinct genre configurations, bounded camera viewports (including seven political-roundtable presets), distinct blocking positions; director console inline JavaScript parsed, no synthetic audio meter animation detected; Control Room scripts, audio runtime, stage app and bridge parsed; DOM binding IDs matched existing 2.5D HTML. Actual FastAPI and MediaRecorder acceptance still untested.
+
+## Three-round audit / latest concrete evidence
+- Isolated V8 source checks: 10 JavaScript modules parsed; inline script of Director Switcher and image Control Room parsed; 45 2.5D UI IDs matched their app binding requirements.
+- Isolated V8 behavior (mocked network, NOT server): **12/12 passed**, covering 8 package configurations and bounded viewports, shared camera registration/atomic select/CUT, two independently published camera frames, publisher stop, monitor display and object URL cleanup. Previously a test fixture lacked a `style` field, which was corrected; not a production bug.
+- JPEG SOF parser algorithm checked against one genuine PIL 64x64 JPEG inside local container; full FastAPI pytest remains unrun.
+- GitHub CI workflow triggered; jobs show `failure` with empty step lists; redirected log blobs unavailable. The actual test commands cannot be confirmed to have started. No green CI claim.
+- **NOT VERIFIED:** browser UI render and GLB animation, actual 2.5D frame reception across browsers, MediaRecorder WebM/MP4 output and IndexedDB playback, audio and mic capture, FastAPI route acceptance, Blackbox, full video stream server recording, mobile GPU/CPU, long-running repeated production and owner acceptance.
+- Latest code review also converted all known CUT entrypoints (`modules/switcher_routes.py`, `modules/production_routes.py`, `modules/studio_console_actions.py`) to CameraManager.take(); runtime regression pending.
