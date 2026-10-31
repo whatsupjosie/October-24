@@ -630,29 +630,51 @@ def create_production_router(
 
     @router.post("/api/production/panic")
     async def production_panic(identity: Dict[str, Any] = Depends(require_role("mod"))):
-        """Emergency: stop all recordings, mute, fade to black."""
-        stopped = []
+        """Emergency: stop active captures, silence program audio, cue black.
+
+        Reports partial failures explicitly; changing an indicator is not proof
+        that FFmpeg and other capture workers actually stopped.
+        """
+        now = time.time()
+        stopped, capture_errors = [], []
         for session in recording.list_sessions():
-            if session.state in (RecordingState.ACTIVE, RecordingState.COUNTDOWN):
+            if session.state not in (RecordingState.ACTIVE, RecordingState.COUNTDOWN, RecordingState.PAUSED):
+                continue
+            try:
                 recording.stop_session(session.session_id)
                 stopped.append(session.session_id)
-
+                try:
+                    await _stop_capture_for_session(session.session_id)
+                except Exception as exc:
+                    capture_errors.append({"session_id": session.session_id, "error": str(exc)})
+            except Exception as exc:
+                capture_errors.append({"session_id": session.session_id, "error": str(exc)})
+        apply_audio_event(program_audio_state, {"action": "stop_all"})
+        program_audio_state.publish({"action": "stop_all"})
+        apply_audio_event(program_audio_state, {"action": "set_volume", "bus": "master", "volume": 0})
+        program_audio_state.publish({"action": "set_volume", "bus": "master", "volume": 0})
         if hub:
-            await hub.broadcast_system_event({
-                "type": "production_panic",
-                "payload": {
-                    "timestamp": time.time(),
-                    "sessions_stopped": stopped,
-                    "message": "PANIC — all recordings stopped, fade to black",
-                },
-            })
             hub.update_production_state({
                 "on_air": False,
                 "camera": "black",
                 "lower_third": "",
+                "panic_seq": now,
             })
-
-        return {"ok": True, "sessions_stopped": stopped}
+            await hub.broadcast_system_event({
+                "type": "production_panic",
+                "payload": {
+                    "timestamp": now,
+                    "sessions_stopped": stopped,
+                    "capture_errors": capture_errors,
+                    "message": "PANIC — capture stop requested, program audio silenced, black video cued",
+                },
+            })
+        _blackbox_event("production.panic", source="system",
+                        actor=str(identity.get("user_id") or "director"),
+                        data={"sessions_stopped": stopped, "capture_errors": capture_errors, "panic_seq": now})
+        return {"ok": not capture_errors, "sessions_stopped": stopped,
+                "capture_errors": capture_errors, "audio_muted": True,
+                "blackout_cued": bool(hub), "panic_seq": now}
 
     return router
 
