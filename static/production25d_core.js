@@ -26,7 +26,8 @@
       cameras:[["wide","Debate podium wide",.5,.53,1],["moderator","Moderator close",.5,.61,2.5],["left","Debater left",.24,.62,2.4],["right","Debater right",.76,.62,2.4],["rebuttal","Rebuttal exchange",.50,.57,1.5]],
       furnishings:["podiums","screen"],graphics:"THE DEBATE" },
     political_discussion: {title:"Political roundtable",subtitle:"Roundtable discussion with host and multiple panelists",theme:["#1b302f","#3f6c60","#dfc397"],people:["host","left","right","guest2"],
-      cameras:[["wide","Roundtable wide",.5,.53,1],["host","Host analysis",.31,.63,2.55],["left","Panelist left",.24,.62,2.4],["right","Panelist right",.76,.62,2.4],["pair","Cross-table discussion",.52,.59,1.58],["four","Four-person panel",.52,.55,1.22]],
+      positions:{host:[.42,.82],left:[.18,.83],right:[.65,.83],guest2:[.86,.83]},
+      cameras:[["wide","Roundtable wide",.5,.53,1],["host","Host analysis",.42,.63,2.55],["left","Panelist left",.18,.62,2.4],["right","Panelist right",.65,.62,2.4],["guest2","Panelist far right",.86,.62,2.4],["pair","Cross-table discussion",.52,.59,1.58],["four","Four-person panel",.52,.55,1.22]],
       furnishings:["panel","screen"],graphics:"POLITICAL ROUNDTABLE" },
     audience: {title:"Audience talk",subtitle:"Host, guests and floor participation",theme:["#30253e","#855d83","#daa47b"], people:["host","guest","guest2"],
       cameras:[["wide","Talk stage wide",.5,.51,1],["host","Host close",.31,.62,2.5],["guest","Guest close",.69,.62,2.6],["two","Guest reactions",.76,.6,2.0],["floor","Audience-facing floor",.5,.54,1.4]],
@@ -44,7 +45,8 @@
   function ensure(condition, message) { if (!condition) throw Error(message); }
   function build(id, data) {
     const cameras = data.cameras.map(([key,label,x,y,zoom]) => ({id:key,label,center:[x,y],zoom}));
-    const performers = data.people.map((slot,i)=>({id:"performer-"+(i+1),slot,position:slots[slot].slice(),avatar:i===0?"female":"male"}));
+    const performers = data.people.map((slot,i)=>({id:"performer-"+(i+1),slot,
+      position:(data.positions?.[slot]||slots[slot]).slice(),avatar:i===0?"female":"male"}));
     return {id,title:data.title,subtitle:data.subtitle,theme:data.theme.slice(),graphics:data.graphics,
       furnishings:data.furnishings.slice(),performers,cameras,assetOverrides:{back:null,mid:null,front:null,logo:null},
       graphicsEnabled:true};
