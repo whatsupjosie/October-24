@@ -145,14 +145,14 @@ const MODES=['auto','news','documentary','cinematic','manual'];
 const MODE_BTN_MAP={auto:'dAuto',news:'dNews',documentary:'dDoc',cinematic:'dCine',manual:'dMan'};
 const studioActions=window.PubCastStudioConsoleHotspots?new window.PubCastStudioConsoleHotspots.StudioConsoleHotspots():null;
 let pgm='cam1',pvw='cam2',isRec=false,recStart=0,mode='auto',ws=null,activeRecordingSessionId='';
-let audioMuted=[false,false,true,false,false];
+let audioMuted=[false,false,false,false,false];
+let controlBlackout=false,lastPanic=0,lastBlackout=0;
 function cam(id){return CAMS.find(c=>c.id===id)||null}
 async function syncSwitcherState(snapshot){
   if(!snapshot||!Array.isArray(snapshot.sources))throw Error("Canonical switcher state unavailable");
   const sources=snapshot.sources.slice(0,5);
-  for(let i=0;i<sources.length;i++){
-    const c=sources[i];CAMS[i]={id:"cam"+(i+1),n:String(i+1),l:c.name||c.id,sourceId:c.id};
-  }
+  const mapped=sources.map((c,i)=>({id:"cam"+(i+1),n:String(i+1),l:c.name||c.id,sourceId:c.id}));
+  CAMS.splice(0,CAMS.length,...mapped);
   const program=CAMS.find(c=>c.sourceId===snapshot.program);
   const preview=CAMS.find(c=>c.sourceId===snapshot.preview);
   pgm=program?.id||"external";pvw=preview?.id||"external";
@@ -189,7 +189,7 @@ function updateUI(){
   CAMS.forEach((c,i)=>{const el=document.getElementById('pvw'+(i+1));if(el)el.className='hotspot round'+(pvw===c.id?' pvw-active':'')});
   const pc=CAMS.find(c=>c.id===pgm),vc=CAMS.find(c=>c.id===pvw);
   document.getElementById('pgmCamText').textContent=pc?'CAM '+pc.n:'BLACK';
-  document.getElementById('pgmFeedText').textContent=pc?pc.l:'BLACK';
+  document.getElementById('pgmFeedText').textContent=controlBlackout?'BLACKOUT CUED':pc?pc.l:'SOURCE UNBOUND';
   document.getElementById('pvwCamText').textContent=vc?'CAM '+vc.n:'â€”';
   MODES.forEach(m=>{const el=document.getElementById(MODE_BTN_MAP[m]);if(el)el.className='hotspot round'+(mode===m?' pvw-active':'')});
   document.getElementById('srMode').textContent='MODE: '+mode.toUpperCase();
@@ -276,8 +276,33 @@ document.addEventListener('keydown',e=>{
 setInterval(()=>{const now=new Date();const tc=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}:${String(Math.floor(now.getMilliseconds()/1000*30)).padStart(2,'0')}`;document.getElementById('pgmTc').textContent=tc;document.getElementById('pvwTc').textContent=tc.slice(0,8);document.getElementById('chkTc').textContent=tc.slice(0,8);if(isRec){const s=Math.floor((Date.now()-recStart)/1000);document.getElementById('hudTime').textContent=`${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}},250);
 // These timecode digits are wall-clock estimates, not recorder synchronization.
 document.getElementById('pgmTc').title='Wall-clock estimate only; not embedded media timecode';
+async function refreshProductionTruth(){
+  try{
+    const response=await fetch("/api/state/production",{cache:"no-store"});
+    if(!response.ok)return;
+    const state=await response.json();
+    const panic=Number(state?.panic_seq)||0, blackout=Number(state?.blackout_seq)||0;
+    if(panic>lastPanic)lastPanic=panic;
+    if(blackout>lastBlackout)lastBlackout=blackout;
+    const next=blackout>panic?state.blackout===true:panic>0;
+    if(controlBlackout!==next){controlBlackout=next;updateUI();}
+  }catch(_){}
+}
+async function refreshAudioTruth(){
+  try{
+    const response=await fetch("/api/program-audio/status",{cache:"no-store"});
+    if(!response.ok)return;
+    const result=await response.json();
+    if(result.ok&&result.status?.buses){
+      const buses=["dialogue","music","sfx","vtr","room"];
+      audioMuted=buses.map(bus=>!!result.status.buses[bus]?.muted);
+    }
+  }catch(_){}
+}
 setInterval(()=>refreshCanonical().catch(()=>{}),1200);
-refreshCanonical();
+setInterval(()=>refreshProductionTruth().catch(()=>{}),900);
+setInterval(()=>refreshAudioTruth().catch(()=>{}),3500);
+refreshCanonical();refreshProductionTruth();refreshAudioTruth();
 function connectWS(){try{ws=new WebSocket(window.ReachAuth.websocketURL('/ws/controlroom'));ws.onmessage=e=>{try{const m=JSON.parse(e.data);handleWsEvent(m);if(typeof window.__pubcastStationsHook==='function')window.__pubcastStationsHook(m)}catch{}};ws.onclose=()=>setTimeout(connectWS,3000)}catch{}}
 function handleWsEvent(m){
   switch(m.type){
