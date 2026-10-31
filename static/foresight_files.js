@@ -112,14 +112,14 @@ async function mount(c,host,file,options={}){
   const wrap=node('div',{'class':'ff-workspace',style:'display:flex;flex-direction:column;height:100%;min-height:0;padding:12px;box-sizing:border-box;color:#efdfc2;gap:8px'});
   const bar=node('div',{style:'display:flex;flex-wrap:wrap;gap:6px'}),status=node('div',{role:'status',style:'font-size:12px;white-space:pre-wrap'}),area=node('div',{style:'flex:1;min-height:0;overflow:auto'});
   wrap.append(bar,status,area);body.append(wrap);
-  let alive=true, value, editor, image, canvas, url, handle, timer, saving=Promise.resolve(), serial=0, changed=false, processing=Promise.resolve();
+  let alive=true, value, editor, image, canvas, url, handle, timer, saving=Promise.resolve(), serial=0, diagnosticVersion=-1, changed=false, processing=Promise.resolve();
   const say=s=>{if(alive)status.textContent=s};
   function button(label,fn){const b=node('button',{type:'button',class:'fp-btn'},label);b.onclick=()=>Promise.resolve().then(fn).catch(e=>say(e.message));bar.append(b);return b}
   function snapshot(){return {...value,draft:editor?(options.getText?.()??editor.value):value.draft,title:options.getTitle?.()||value.title,twoiState:options.getState?{...value.twoiState,...structuredClone(options.getState())}:value.twoiState,updated:Date.now()}}
   function persist(){
     if(!value)return Promise.reject(Error('File has not finished opening'));
     clearTimeout(timer);const v=snapshot(),version=serial;
-    saving=saving.catch(()=>{}).then(()=>record(v.id,v,value.revision||0)).then(saved=>{value.revision=saved.revision;if(serial===version){changed=false;say(handle?'Saved to chosen file and PubCast · source snapshot retained':'Working copy saved in PubCast · source snapshot retained')}return v});
+    saving=saving.catch(()=>{}).then(()=>record(v.id,v,value.revision||0)).then(saved=>{value.revision=saved.revision;if(serial===version){changed=false;if(diagnosticVersion!==version)say(handle?'Saved to chosen file and PubCast · source snapshot retained':'Working copy saved in PubCast · source snapshot retained')}return v});
     return saving;
   }
   function dirty(){serial++;changed=true;say('Unsaved changes');host.changed();clearTimeout(timer);timer=setTimeout(()=>persist().catch(e=>say('Save failed: '+e.message)),350)}
@@ -248,7 +248,7 @@ async function mount(c,host,file,options={}){
       editor=options.editor||node('textarea',{'aria-label':'File editor',spellcheck:'false',style:'box-sizing:border-box;width:100%;height:100%;min-height:180px;resize:none;background:#171511;color:#f3e5ca;border:1px solid #887455;padding:12px;font:14px/1.5 monospace;tab-size:4'});
       editor.value=value.draft;options.load?.(value);editor.addEventListener('input',dirty);editor.addEventListener('foresight-native-change',dirty);if(!options.editor)area.append(editor);else area.style.display='none';
       button('Export DOCX',async()=>{download(outputName('docx'),await output('docx'));say('DOCX text copy downloaded; original unchanged')});
-      if(/\.py$/i.test(value.name)){button('Check Python',async()=>{const r=await workspace('check-python',{name:value.name,text:options.getText?.()??editor.value});say(r.message)});button('Run Python',async()=>{await persist();if(parent===window)window.open('/static/foresight_shell.html?script='+encodeURIComponent(value.id),'_blank','noopener');else parent.postMessage({type:'foresight:run-python',fileId:value.id,name:value.name},location.origin)})}
+      if(/\.py$/i.test(value.name)){button('Check Python',async()=>{const version=serial,text=options.getText?.()??editor.value;const r=await workspace('check-python',{name:value.name,text});if(serial===version&&(options.getText?.()??editor.value)===text){diagnosticVersion=version;say(r.message)}});button('Run Python',async()=>{await persist();if(parent===window)window.open('/static/foresight_shell.html?script='+encodeURIComponent(value.id),'_blank','noopener');else parent.postMessage({type:'foresight:run-python',fileId:value.id,name:value.name},location.origin)})}
       if(options.getState)button('Export 2i manuscript',async()=>download(value.name.replace(/\.[^.]*$/,'')+'.2i',await output('2i')));
       if(extension==='pdf')button('View original PDF',()=>{options.onPreview?.(true);area.style.display='block';if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(value.original);const f=node('iframe',{src:url,title:value.name,style:'width:100%;height:100%;border:0'});area.replaceChildren(f);button('Return to editor',()=>{if(options.editor){area.replaceChildren();area.style.display='none';options.onPreview?.(false)}else area.replaceChildren(editor)})});
       say(value.warning||'2i text editor ready · working copy auto-saves · text exports use UTF-8');

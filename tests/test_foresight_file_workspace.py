@@ -382,6 +382,8 @@ def test_python_syntax_check_in_native_editor_without_external_services(page):
     page.wait_for_function(
         "document.querySelector('#host iframe')?.contentWindow.document.querySelector('[role=status]')?.textContent.includes('not executed')"
     )
+    page.wait_for_timeout(600)  # The pending autosave must not erase the syntax result.
+    assert "not executed" in frame.get_by_role("status").inner_text()
 
 
 def test_normal_2i_manuscript_saves_to_reach_and_each_save_is_a_new_revision(page):
