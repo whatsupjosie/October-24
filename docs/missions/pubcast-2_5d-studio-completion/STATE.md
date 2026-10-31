@@ -58,3 +58,13 @@ Always continue after a milestone if actionable work remains.
 - 12 isolated V8 behavior/geometry checks passed; ten JS modules and both Control Room inline scripts parsed (proper inline extraction). These do not prove browser/runtime operation.
 - GitHub Actions jobs showed failure with zero steps and no retrievable logs; cannot claim test commands started. CI runner investigation remains blocked.
 - **Next:** obtain an executable checkout/runner; run Node and pytest; exercise real production, remote video, local recorder and PANIC; address failures; implement full-rate media and Blackbox integration; performance/debug pass; owner review only after evidence.
+
+
+## Minimal shoot assembly/editor bridge — 2026-10-30 (branch implementation; UI runtime UNVERIFIED)
+- Original compact Control Room editor is now wired: project, proxy bin, viewer, In/Out, source-level selections, split, lift, ripple delete, move shot, close gaps and transport. Non-destructive plan only, not a finishing suite.
+- Clacker timebase = 15 seconds; per-track offset supports +0.030 s at microsecond precision. Local IndexedDB project/proxy storage and simple JSON sidecar interchange.
+- Standard CMX3600 non-drop **24/25/30 fps cuts-only** EDL with cumulative frame rounding; lossless source-byte download as a separate action. EDL drops multitrack audio and subframe corrections; sidecar retains them. **Import into DaVinci Resolve not runtime validated.**
+- Source/master provenance audit refuses to assert cinema-master quality from a preview or merely tagged 4K input. Existing browser recorder is only 1280×720 nominal 3Mbps; it does not meet the user's hard high-quality export gate.
+- Live-switcher keyboard is disarmed when editing, so Space for playback cannot issue an unintended live CUT.
+- Added 12 regression cases in `tests/test_editor_sync_interchange.cjs`; all **12 passed in an isolated V8 harness** using the actual fetched modules. CI wired but not evidenced as working. No Node, browser or Resolve run has been claimed.
+- Binding finishing boundary and acceptance tests: `EDITOR_AND_FINISHING_BOUNDARY.md`. Next critical gate is deterministic source-level replay master + native high-quality 4K frame/selected-render output, not extra editor effects.
