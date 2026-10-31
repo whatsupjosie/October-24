@@ -133,7 +133,7 @@
  function addSelection(project,config){
    validateProject(project);
    const item={id:id(config.id||"select-"+(project.selections.length+1),"selection"),
-     trackId:id(config.trackId,"source track"),
+     kind:"shot",trackId:id(config.trackId,"source track"),
      inUs:bounded(config.inUs,"in",0,MAX_DURATION_US),
      outUs:bounded(config.outUs,"out",0,MAX_DURATION_US),
      label:String(config.label||"").slice(0,128)};
@@ -150,8 +150,26 @@
    if(!Array.isArray(p.tracks)||p.tracks.length>32||!Array.isArray(p.selections)||p.selections.length>10000)throw Error("Invalid project collections");
    const ids=new Set();
    for(const t of p.tracks){validateTrack(t);if(ids.has(t.id))throw Error("Duplicate track");ids.add(t.id);}
-   for(const s of p.selections){if(!ids.has(s.trackId))throw Error("Selection refers to missing track");
-     if(!Number.isSafeInteger(s.inUs)||!Number.isSafeInteger(s.outUs)||s.inUs<0||s.outUs<=s.inUs||s.outUs>MAX_DURATION_US)throw Error("Invalid selection");}
+   const selectIds=new Set();
+   let assembledDurationUs=0;
+   for(const s of p.selections){
+     id(s.id,"selection ID");
+     if(selectIds.has(s.id))throw Error("Duplicate selection");
+     selectIds.add(s.id);
+     let duration;
+     if(s.kind==="gap"){
+       duration=bounded(s.durationUs,"gap duration",1,MAX_DURATION_US);
+     }else{
+       if(s.kind!=null&&s.kind!=="shot")throw Error("Invalid selection kind");
+       if(!ids.has(s.trackId))throw Error("Selection refers to missing track");
+       bounded(s.inUs,"selection in",0,MAX_DURATION_US);
+       bounded(s.outUs,"selection out",0,MAX_DURATION_US);
+       if(s.outUs<=s.inUs)throw Error("Selection out must exceed in");
+       duration=s.outUs-s.inUs;
+     }
+     assembledDurationUs+=duration;
+     if(assembledDurationUs>MAX_DURATION_US)throw Error("Assembled timeline exceeds 24 hours");
+   }
    return true;
  }
  function touch(p){p.updatedAt=new Date().toISOString();p.revision=(p.revision||0)+1;}
@@ -159,11 +177,77 @@
    validateProject(p);
    return {schema:"pubcast.render-selection",version:1,projectId:p.id,
      clock:{originUnixMs:p.originUnixMs,intervalUs:INTERVAL_US},
-     shots:p.selections.map(s=>{const t=track(p,s.trackId),a=alignment(p,t);
-       return {id:s.id,trackId:t.id,mediaRef:t.mediaRef,editInUs:s.inUs,editOutUs:s.outUs,
+     shots:timelineEntries(p).map(s=>{
+       if(s.kind==="gap")return {id:s.id,kind:"gap",timelineInUs:s.timelineInUs,
+         timelineOutUs:s.timelineOutUs,durationUs:s.durationUs};
+       const t=track(p,s.trackId),a=alignment(p,t);
+       return {id:s.id,kind:"shot",trackId:t.id,mediaRef:t.mediaRef,
+         timelineInUs:s.timelineInUs,timelineOutUs:s.timelineOutUs,
+         editInUs:s.inUs,editOutUs:s.outUs,
          sourceInUs:sourceTimeUs(p,t.id,s.inUs),sourceOutUs:sourceTimeUs(p,t.id,s.outUs),
          syncOrigin:a.origin,clackerMarkers:a.markers,manualOffsetUs:t.manualOffsetUs,
-         driftPpm:a.driftPpm};})};
+         driftPpm:a.driftPpm};
+     })};
+ }
+ /** Sequential rough-cut assembly, including explicit blank spaces. */
+ function timelineEntries(p){
+   validateProject(p);
+   let at=0;
+   return p.selections.map(s=>{
+     const durationUs=s.kind==="gap"?s.durationUs:s.outUs-s.inUs;
+     const entry={...s,timelineInUs:at,timelineOutUs:at+durationUs,durationUs};
+     at+=durationUs;return entry;
+   });
+ }
+ function entryAt(p,atUs){
+   bounded(atUs,"timeline time",0,MAX_DURATION_US);
+   const list=timelineEntries(p);
+   return list.find(e=>atUs>=e.timelineInUs&&atUs<e.timelineOutUs)||
+     (atUs===list.at(-1)?.timelineOutUs?list.at(-1):null);
+ }
+ function gap(p,durationUs,entryId){
+   validateProject(p);
+   bounded(durationUs,"gap duration",1,MAX_DURATION_US);
+   const item={id:id(entryId||"gap-"+Date.now()+"-"+(p.selections.length+1),"gap ID"),
+     kind:"gap",durationUs};
+   if(p.selections.some(s=>s.id===item.id))throw Error("Duplicate selection ID");
+   p.selections.push(item);validateProject(p);touch(p);return item;
+ }
+ function splitAt(p,selectionId,timelineUs){
+   validateProject(p);bounded(timelineUs,"split time",0,MAX_DURATION_US);
+   const e=timelineEntries(p).find(e=>e.id===selectionId);
+   if(!e||e.kind==="gap")throw Error("Choose a video/audio shot to split");
+   if(timelineUs<=e.timelineInUs||timelineUs>=e.timelineOutUs)throw Error("Split must be inside clip, not at its edge");
+   const cutUs=e.inUs+(timelineUs-e.timelineInUs);
+   const i=p.selections.findIndex(s=>s.id===selectionId);
+   const original=p.selections[i],left={...original,outUs:cutUs},
+     right={...original,id:id(original.id+"-split-"+(p.revision+1),"new split ID"),inUs:cutUs};
+   if(p.selections.some(x=>x.id===right.id))throw Error("Split ID conflict");
+   p.selections.splice(i,1,left,right);validateProject(p);touch(p);return [left,right];
+ }
+ function deleteSelection(p,selectionId,ripple=true){
+   validateProject(p);
+   const i=p.selections.findIndex(x=>x.id===selectionId);
+   if(i<0)throw Error("Selected clip missing");
+   const s=p.selections[i],duration=s.kind==="gap"?s.durationUs:s.outUs-s.inUs;
+   if(ripple)p.selections.splice(i,1);
+   else p.selections.splice(i,1,{id:id("lift-"+s.id+"-"+(p.revision+1),"lift ID"),kind:"gap",durationUs:duration});
+   validateProject(p);touch(p);return {durationUs:duration,ripple};
+ }
+ function closeGaps(p){
+   validateProject(p);const removed=p.selections.filter(s=>s.kind==="gap").length;
+   if(!removed)return 0;
+   p.selections=p.selections.filter(s=>s.kind!=="gap");
+   validateProject(p);touch(p);return removed;
+ }
+ function moveSelection(p,selectionId,direction){
+   validateProject(p);
+   if(direction!==-1&&direction!==1)throw Error("Movement must be -1 or +1");
+   const i=p.selections.findIndex(x=>x.id===selectionId),j=i+direction;
+   if(i<0)throw Error("Unknown rough-cut selection");
+   if(j<0||j>=p.selections.length)return false;
+   [p.selections[i],p.selections[j]]=[p.selections[j],p.selections[i]];
+   touch(p);return true;
  }
  function clackerPCM(durationUs,sampleRate=48000){
    bounded(durationUs,"duration",0,12*3600*1000000);
@@ -188,5 +272,6 @@
  }
  return {VERSION,INTERVAL_US,parseSeconds,formatSeconds,createProject,validateProject,
    addTrack,setOffsetUs,setOffsetSeconds,adjustOffsetSeconds,addClackerMark,alignment,
-   sourceTimeUs,editTimeUs,markersBetween,addSelection,exportManifest,clackerPCM};
+   sourceTimeUs,editTimeUs,markersBetween,addSelection,timelineEntries,entryAt,
+   gap,splitAt,deleteSelection,closeGaps,moveSelection,exportManifest,clackerPCM};
 });
