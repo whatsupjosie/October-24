@@ -115,10 +115,10 @@ async function choosePreview(id){
  }
  emit("camera.preview",{id,shared:!!state.sharedSwitcher?.connected()});log("PREVIEW "+id);
 }
-function makeTransition(){
+function makeTransition(duration=600,elapsedMs=0){
  prior.clearRect(0,0,Core.W,Core.H);
  prior.drawImage(el.program,0,0,Core.W,Core.H);
- state.transition={started:performance.now(),duration:600};
+ state.transition={started:performance.now()-Math.max(0,elapsedMs),duration};
 }
 async function cut(dissolve){
  if(!state.pkg||!state.session)throw Error("Start production before switching Program");
@@ -138,6 +138,18 @@ async function cut(dissolve){
 }
 function sharedSwitcherState(next) {
  if(!state.session)return;
+ const previous=state.programId;
+ const transition=next.transition||{};
+ if(next.program&&next.program!==previous&&transition.type==="dissolve"){
+   const elapsed=Number.isFinite(Number(transition.started_at))
+     ? Date.now()-Number(transition.started_at)*1000 : Number.POSITIVE_INFINITY;
+   const duration=Math.min(4000,Math.max(0,Number(transition.duration_ms)||0));
+   if(duration&&elapsed>=-100&&elapsed<duration){
+     // A second director can trigger a real remote dissolve. Respect the
+     // server timestamp so late polling does not replay a finished transition.
+     makeTransition(duration,elapsed);
+   }
+ }
  state.remoteProgram=next.remoteProgram;
  state.remotePreview=next.remotePreview;
  if(next.program)state.programId=next.program;
