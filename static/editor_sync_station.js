@@ -77,8 +77,9 @@ async function resolveMedia(t){
  }
  return null;
 }
-async function selectTrack(id){
- ensure();if(currentTrackId&&currentTrackId!==id)updatePlayhead();
+async function selectTrack(id,preserveShootPosition=false){
+ ensure();
+ if(!preserveShootPosition&&currentTrackId&&currentTrackId!==id)updatePlayhead();
  const t=project.tracks.find(x=>x.id===id);if(!t)throw Error("Track not found");
  currentTrackId=t.id;stopPreview();const token=selectionToken;
  renderBin();renderSelected();
@@ -92,8 +93,20 @@ async function selectTrack(id){
  media.addEventListener("loadedmetadata",()=>{
    if(token!==selectionToken)return;
    const sec=Math.max(0,desired/1000000);
-   try{media.currentTime=Number.isFinite(media.duration)&&media.duration>0?Math.min(sec,Math.max(0,media.duration-.001)):sec}
-   catch(e){fail(e)}
+   try{
+     if(Number.isFinite(media.duration)&&media.duration>0&&media.duration<=24*3600){
+       const durationUs=Math.round(media.duration*1000000);
+       if(t.durationUs!==durationUs){t.durationUs=durationUs;project.revision++;project.updatedAt=new Date().toISOString();save().catch(fail)}
+     }
+     const quality=t.quality||{role:"unverified",verified:false,bytePreserved:false};
+     if(media.videoWidth>0&&media.videoHeight>0&&
+       (quality.width!==media.videoWidth||quality.height!==media.videoHeight)){
+       t.quality={...quality,width:media.videoWidth,height:media.videoHeight};
+       project.revision++;project.updatedAt=new Date().toISOString();save().catch(fail);
+     }
+     media.currentTime=Number.isFinite(media.duration)&&media.duration>0?
+       Math.min(sec,Math.max(0,media.duration-.001)):sec;
+   }catch(e){fail(e)}
  },{once:true});
  media.load();say("Viewing "+t.label+" — source is unchanged");
 }
@@ -106,10 +119,15 @@ function renderBin(){
    if(t.id===currentTrackId)row.style.background="rgba(140,150,255,.16)";
    const choose=document.createElement("button");choose.type="button";choose.style.flex="1";choose.textContent=(t.kind==="audio"?"♫ ":"▣ ")+t.label;
    choose.addEventListener("click",()=>safe(()=>selectTrack(t.id)));
-   choose.addEventListener("contextmenu",e=>{e.preventDefault();currentTrackId=t.id;renderSelected();renderBin();ui.menu.hidden=false});
+   choose.addEventListener("contextmenu",e=>{
+   e.preventDefault();ui.menu.hidden=false;
+   safe(()=>selectTrack(t.id));
+ });
    const offset=document.createElement("span");offset.className="muted small";offset.textContent=(t.manualOffsetUs>=0?"+":"")+Core.formatSeconds(t.manualOffsetUs)+"s";
    const adjust=document.createElement("button");adjust.type="button";adjust.textContent="Sync / Offset";
-   adjust.addEventListener("click",()=>{currentTrackId=t.id;renderSelected();renderBin();ui.menu.hidden=false;ui.offset.focus()});
+   adjust.addEventListener("click",()=>{
+   ui.menu.hidden=false;safe(async()=>{await selectTrack(t.id);ui.offset.focus()});
+ });
    row.append(choose,offset,adjust);ui.bin.append(row);
  }
 }
@@ -136,7 +154,7 @@ function renderTimeline(){
    const choose=document.createElement("button");choose.type="button";choose.textContent="Select";
    choose.addEventListener("click",()=>safe(async()=>{
      activeClipId=e.id;
-     if(e.kind!=="gap"){playheadUs=e.inUs;await selectTrack(e.trackId)}
+     if(e.kind!=="gap"){playheadUs=e.inUs;await selectTrack(e.trackId,true)}
      renderTimeline();ui.activeClip.textContent=e.kind==="gap"?"Selected blank":("Selected "+(track?.label||e.trackId));
    }));
    const up=document.createElement("button");up.type="button";up.textContent="↑";up.title="Earlier in rough cut";
@@ -162,7 +180,7 @@ function navigateShot(direction){
  if(!next)throw Error("No adjacent shot");
  activeClipId=next.id;playheadUs=next.inUs;
  ui.activeClip.textContent="Selected "+(project.tracks.find(t=>t.id===next.trackId)?.label||next.trackId);
- return selectTrack(next.trackId).then(renderTimeline);
+ return selectTrack(next.trackId,true).then(renderTimeline);
 }
 function splitCurrent(){
  const e=activeEntry();if(e.kind==="gap")throw Error("Choose a shot, not blank space");
@@ -262,11 +280,11 @@ function exportEDL(){
 async function exportSource(){
  const t=selected(),blob=await resolveMedia(t);
  if(!blob||!blob.size)throw Error("The selected media isn't available here. Relink the source first.");
- const name=filenameSafe(t.label);
+ const name=String(t.label).replace(/[\\/:*?"<>|]/g,"_").slice(0,180)||"original-media";
  downloadBlob(blob,name);
  say("Saved "+name+" as stored bytes—no transcode or upscale. Source quality is not certified.");
 }
-function changePlayhead(us){playheadUs=Math.max(0,us);if(currentTrackId)selectTrack(currentTrackId).catch(fail);ui.playhead.textContent="Shoot time: "+timeText(playheadUs)}
+function changePlayhead(us){playheadUs=Math.max(0,us);if(currentTrackId)selectTrack(currentTrackId,true).catch(fail);ui.playhead.textContent="Shoot time: "+timeText(playheadUs)}
 ui.newProject.addEventListener("click",()=>safe(createShoot));
 ui.save.addEventListener("click",()=>safe(async()=>{await save();await refreshProjects()}));
 ui.projects.addEventListener("change",()=>{if(ui.projects.value)safe(()=>openProject(ui.projects.value))});
