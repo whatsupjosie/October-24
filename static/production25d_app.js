@@ -195,8 +195,11 @@ async function syncServerVideoCues(){
    }
    const blackSeq=Number(remote.blackout_seq)||0;
    if(blackSeq&&blackSeq!==state.lastBlackoutSeq){
-     state.lastBlackoutSeq=blackSeq;state.blackout=remote.blackout===true;
-     cue("remote_blackout",{enabled:state.blackout});
+     state.lastBlackoutSeq=blackSeq;
+     if(blackSeq>state.lastPanicSeq){
+       state.blackout=remote.blackout===true;
+       cue("remote_blackout",{enabled:state.blackout});
+     }
    }
    const barsSeq=Number(remote.preview_bars_seq)||0;
    if(barsSeq&&barsSeq!==state.lastBarsSeq){
@@ -494,7 +497,20 @@ function initializeControls(){
  $("gesture").addEventListener("click",()=>safe(animate));
  $("reset").addEventListener("click",()=>safe(reset));
  $("lower").addEventListener("click",()=>safe(()=>{state.lowerThird=!state.lowerThird;cue("lower_third",{enabled:state.lowerThird,text:state.lowerText})}));
- $("black").addEventListener("click",()=>safe(()=>{state.blackout=!state.blackout;cue("blackout",{enabled:state.blackout})}));
+ $("black").addEventListener("click",()=>safe(async()=>{
+   const enabled=!state.blackout;
+   if(state.sharedSwitcher?.connected()){
+     const response=await fetch("/api/production/video-cue",{
+       method:"POST",headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({cue:"blackout",enabled})
+     });
+     if(!response.ok)throw Error("Shared blackout command HTTP "+response.status);
+     const result=await response.json();
+     if(!result?.ok)throw Error("Shared blackout was not confirmed");
+     state.lastBlackoutSeq=Number(result.blackout_seq)||state.lastBlackoutSeq;
+   }
+   state.blackout=enabled;cue("blackout",{enabled,shared:!!state.sharedSwitcher?.connected()});
+ }));
  $("scoreLeft").addEventListener("click",()=>safe(()=>{state.scores[0]++;cue("score",{contestant:0,value:state.scores[0]})}));
  $("scoreRight").addEventListener("click",()=>safe(()=>{state.scores[1]++;cue("score",{contestant:1,value:state.scores[1]})}));
  $("backFile").addEventListener("change",e=>safe(()=>chooseImage(e.target,"back")));
