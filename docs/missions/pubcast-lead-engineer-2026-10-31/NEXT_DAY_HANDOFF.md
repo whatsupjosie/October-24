@@ -120,3 +120,12 @@ chat; the user must start that agent task in the supported interface.
 If the engineering agent encounters limitations, keep this ledger
 factually accurate and keep working on independent available steps.
 Do not ask the owner to perform development work the agent can do.
+
+## Latest CI probe — same day
+`pubcast-25d-integrity.yml` now explicitly includes the NEW lead branch
+in its push trigger. GitHub Actions run **41200964842** began on
+`a06474a1f6c3e8861f29bc793e917c969fad355f`, and both `python-syntax`
+and `javascript` jobs are labeled failure. Their returned step lists are
+**empty**, so the failing command is unknown and tests cannot be claimed
+executed. The next engineer should reproduce locally or inspect runner
+diagnostics with actual logs; avoid repeating empty-result calls.
