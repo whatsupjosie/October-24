@@ -24,7 +24,8 @@ recordingMime:"",microphoneMuted:false,microphoneLevel:1,selected:null,playbackU
 lastTick:0,blackout:false,lowerThird:false,lowerText:"BELLA FAUX PAS",scores:[0,0],transition:null,
 storageReady:false,assetUrls:{},assetByPackage:{},avatarChecks:0,
 sharedSwitcher:null,remoteProgram:null,remotePreview:null,programMixSource:null,mediaPublisher:null,
-avatarGeneration:0,avatarLoadingGeneration:-1,loadedActorIds:new Set()};
+avatarGeneration:0,avatarLoadingGeneration:-1,loadedActorIds:new Set(),
+previewBars:false,lastPanicSeq:0,lastBlackoutSeq:0,lastBarsSeq:0,cuePollBusy:false};
 const pr=el.program.getContext("2d"), pv=el.preview.getContext("2d"), prior=lastFrame.getContext("2d");
 function status(message,error){
  el.state.textContent=message;el.state.classList.toggle("error",!!error);
@@ -169,6 +170,41 @@ function sharedSwitcherWarning(reason) {
 }
 function cue(type,payload){
  emit("cue."+type,payload||{});log("CUE "+type+(payload?.performer?" "+payload.performer:""));
+}
+function drawPreviewBars(c){
+ const colors=["#ddd","#f0db34","#16dade","#31da4e","#d146e3","#e24f42","#225bec","#161616"];
+ for(let i=0;i<colors.length;i++){c.fillStyle=colors[i];c.fillRect(i*Core.W/colors.length,0,Core.W/colors.length,Core.H*.72);}
+ c.fillStyle="#121212";c.fillRect(0,Core.H*.72,Core.W,Core.H*.28);
+ c.fillStyle="#ffffff";c.font="bold 26px system-ui";c.textAlign="center";
+ c.fillText("PUBCAST PREVIEW TEST PATTERN — NOT A CAMERA",Core.W/2,Core.H*.84);
+}
+async function syncServerVideoCues(){
+ if(!state.session||state.cuePollBusy)return;
+ state.cuePollBusy=true;
+ try{
+   const response=await fetch("/api/state/production",{cache:"no-store"});
+   if(!response.ok)return;
+   const remote=await response.json();
+   if(!remote||typeof remote!=="object")return;
+   const panicSeq=Number(remote.panic_seq)||0;
+   if(panicSeq>state.lastPanicSeq&&panicSeq>Date.parse(state.session.startedAt)/1000){
+     state.lastPanicSeq=panicSeq;state.blackout=true;
+     cue("remote_panic",{panicSeq});
+     status("PANIC: BLACKOUT");
+     if(state.recorder)await stopRecording();
+   }
+   const blackSeq=Number(remote.blackout_seq)||0;
+   if(blackSeq&&blackSeq!==state.lastBlackoutSeq){
+     state.lastBlackoutSeq=blackSeq;state.blackout=remote.blackout===true;
+     cue("remote_blackout",{enabled:state.blackout});
+   }
+   const barsSeq=Number(remote.preview_bars_seq)||0;
+   if(barsSeq&&barsSeq!==state.lastBarsSeq){
+     state.lastBarsSeq=barsSeq;state.previewBars=remote.preview_bars===true;
+     cue("preview_bars",{enabled:state.previewBars});
+   }
+ }catch(e){if(state.sharedSwitcher?.connected())log("VIDEO CUE POLL ERROR "+e.message);}
+ finally{state.cuePollBusy=false;}
 }
 function move(delta){
  const p=state.performers.find(p=>p.id===el.performer.value);if(!p)return;
@@ -406,6 +442,7 @@ function frame(now){
   Render.renderCamera(pr,pkg,Core.shot(pkg,state.programId),state,world,dt);
   const previewState=Object.assign({},state,{blackout:false,lowerThird:false});
   Render.renderCamera(pv,pkg,Core.shot(pkg,state.previewId),previewState,world,0);
+  if(state.previewBars)drawPreviewBars(pv);
   if(state.remoteProgram){
     pr.fillStyle="#000";pr.fillRect(0,0,Core.W,Core.H);
     pr.fillStyle="#ff8b8b";pr.font="bold 28px system-ui";pr.textAlign="center";
@@ -486,6 +523,8 @@ async function init(){
  try{const db=await Store.open();db.close();state.storageReady=true;}catch(e){error("Persistent recording storage unavailable: "+e.message);}
  loadGenre("news");setControls();await refreshSessions();
  window.requestAnimationFrame(frame);
+ const cuePoll=setInterval(()=>syncServerVideoCues().catch(e=>log("CUE ERROR "+e.message)),500);
+ window.addEventListener("pagehide",()=>clearInterval(cuePoll));
  window.PubCast25DStudio={state:()=>({package:state.pkg?.id,program:state.programId,preview:state.previewId,recording:!!state.recorder,session:state.session?.id||null,storage:state.storageReady}),
  loadGenre,choosePreview,cut,startProduction,stopProduction,startRecording,stopRecording};
  document.documentElement.dataset.production25d="ready";
