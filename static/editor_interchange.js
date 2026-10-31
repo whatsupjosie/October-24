@@ -59,6 +59,14 @@
        quality:q,durationUs:t.durationUs??null,manualOffsetUs:t.manualOffsetUs,markers:t.clackerMarks.length});
      if(q.role==="proxy")problems.push(t.label+": only a proxy is identified; cannot claim professional source quality");
      if(q.role==="unverified")warnings.push(t.label+": camera/master status and decode quality are unverified");
+     if(q.role!=="unverified"&&q.role!=="proxy"&&!q.verified)
+       warnings.push(t.label+": source quality provenance has not been independently verified");
+     if(q.role!=="unverified"&&q.role!=="proxy"&&!q.bytePreserved)
+       problems.push(t.label+": source bytes are not confirmed preserved");
+     if(t.mediaRef?.startsWith("local:"))
+       warnings.push(t.label+": this media currently lives in browser-local IndexedDB, not in a portable finishing folder");
+     if(t.mediaRef?.startsWith("studio:"))
+       warnings.push(t.label+": this is a browser-recorded stage file, not automatically a full-fidelity scene master");
      if(!q.width||!q.height)warnings.push(t.label+": original pixel dimensions not recorded");
      if(q.role==="replayable_scene")warnings.push(t.label+": full-fidelity scene replay renderer and material assets must accompany this transfer");
      if(q.role==="high_quality_render"&&!q.verified)warnings.push(t.label+": high-quality render has not been verified");
@@ -113,9 +121,13 @@
    const lines=["TITLE: "+name,"FCM: NON-DROP FRAME","","* PUBCAST FRAME RATE: "+fps,
      "* EXPORT: SIMPLE CUTS + BLANK GAPS ONLY; RETAIN THE .pubcast-handoff.json FOR SYNC AND AUDIO"];
    const warnings=[];
-   let recordFrame=BASE_TC_HOUR*3600*fps;
+   let recordFrame=BASE_TC_HOUR*3600*fps,recordOffsetUs=0;
    for(let i=0;i<entries.length;i++){
-     const e=entries[i],isGap=e.kind==="gap",durFrames=toFrames(e.durationUs,fps);
+     const e=entries[i],isGap=e.kind==="gap";
+     // Round cumulative sequence boundaries, rather than independently rounding
+     // every shot. Otherwise fractional frame loss accumulates over hundreds of cuts.
+     const nextOffsetUs=recordOffsetUs+e.durationUs;
+     const durFrames=toFrames(nextOffsetUs,fps)-toFrames(recordOffsetUs,fps);
      if(durFrames<1)throw Error("A clip or gap is shorter than one frame at "+fps+" fps");
      const clipInfo=isGap?null:tracks.get(e.trackId);
      if(!isGap&&!clipInfo)throw Error("Missing source track for "+e.id);
@@ -138,7 +150,7 @@
        if(clipInfo.track.manualOffsetUs)
          lines.push("* PUBCAST MANUAL OFFSET US: "+clipInfo.track.manualOffsetUs);
      }
-     recordFrame=recordOut;
+     recordFrame=recordOut;recordOffsetUs=nextOffsetUs;
    }
    lines.push("");
    return {edl:lines.join("\n"),warnings,rate:fps,eventCount:entries.length,
