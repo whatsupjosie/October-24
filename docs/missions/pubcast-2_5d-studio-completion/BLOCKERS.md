@@ -20,3 +20,13 @@ Two-minute stall rule: record actual attempts/errors here; avoid repeated unchan
 5. **Runtime/performance:** No full browser/phone trial yet, no actual MediaRecorder persisted WebM playback, no GLB offscreen renderer stress measurements.
 6. **Camera registration lifetime:** Genre sources may remain registered after studio closes; do not unregister other operators' active cameras without ownership arbitration.
 7. **Owner artwork:** Pending, *nonblocking*. Keep placeholders and final switcher layout replaceable.
+
+
+## Post-production / professional-quality export release blockers — 2026-10-30
+- **HARD:** The 2.5D production source is not yet a deterministic, machine-portable, fully asset-backed replay master. A browser preview WebM and event JSON are insufficient for reconstructing arbitrary camera coverage at higher fidelity.
+- **HARD:** No verified native 4K/high-fidelity selected-frame renderer with independent audio and source-level material/animation fidelity. Exporting original existing WebM bytes honestly is useful but is NOT the promised high-quality cinema-master path.
+- **HARD:** A CMX3600 EDL and .pubcast-handoff.json are implemented but have not been imported/relinked in actual Resolve Free on an independent computer. Current interchange is intentionally lossy for multitrack audio and subframe sync.
+- **HARD:** Clacker reference/offset core exists, but actual camera/audio/blip recording and automatic sync marks from all clients are not yet verified. The 15-second red dash/independent blip path is still absent from full production capture.
+- **ENGINEERING:** Browser editor controls, local-file persistence, relink, download and timing playback need real runtime acceptance. 12/12 isolated script checks are not a substitute.
+- **ENGINEERING:** The existing local browser/proxy storage does not yet provide a single portable all-source export bundle, independent hashes/asset licensing, or cross-machine restoration.
+- Acceptance contract: `EDITOR_AND_FINISHING_BOUNDARY.md`. None of these blockers are cleared merely by adding UI labels or metadata.
