@@ -3,7 +3,7 @@
 Branch: `pubcast-25d-production-integration-2026-10-30` (separate from working Bella preview and main).
 
 ## Implemented in branch, runtime UNVERIFIED
-- `static/production25d_core.js`: seven declarative genre packages, shot geometry, event/session core.
+- `static/production25d_core.js`: eight declarative genre packages, shot geometry, event/session core.
 - `static/production25d_renderer.js`: layered procedural backgrounds, middleground, furniture/foreground, camera cropping, GLB drawing, graphics and scores.
 - `static/production25d_storage.js`: IndexedDB transactional session and media storage.
 - `static/production25d_app.js`: browser directing surface, camera cut/dissolve, cue controls, GLB loading, microphone capture/mixer, MediaRecorder, persistence and playback.
@@ -44,5 +44,7 @@ Always continue after a milestone if actionable work remains.
 - `static/control_stations.js` audio Apply now updates master/dialogue/music via server; removed console-only stub.
 - 2.5D local recorder captures mixed audio stream plus optional mic (actual browser execution NOT verified).
 - Added test sources `tests/test_shared_studio_switchers.py`, `tests/test_production25d_switcher_bridge.cjs`.
-- Isolated trusted-JavaScript parse/mocks PASSED for core, renderer, storage, bridge, app, audio runtime; seven genre viewports validated; all required UI IDs present; shared switcher state changes and local fallback simulated. **This does NOT prove actual browser/pytest integration.**
+- Isolated trusted-JavaScript parse/mocks PASSED for core, renderer, storage, bridge, app, audio runtime; eight genre viewports validated; all required UI IDs present; shared switcher state changes and local fallback simulated. **This does NOT prove actual browser/pytest integration.**
 - Outstanding critical: real browser and FastAPI testing, remote media ingest, Blackbox, full stations/recording wiring.
+
+- Genre coverage expanded to eight packages: formal debate and political roundtable are distinct, with four individually blocked panelists in the roundtable. Director switcher now loads canonical camera registry, checks server command responses, removes invented audio/VU bars and displays actual bus states; monitor output remains explicitly unbound pending real video-feed integration.
