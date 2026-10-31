@@ -234,6 +234,16 @@
               <h4>Aligned Proxy Viewer</h4>
               <video id="ed-view" controls playsinline preload="metadata" style="width:100%;background:#000;border-radius:6px"></video>
               <audio id="ed-audio" controls preload="metadata" style="width:100%;margin-top:4px"></audio>
+              <!-- Original compact transport, aligned to familiar source-viewer conventions. -->
+              <div id="ed-transport" class="row" role="toolbar" aria-label="Shoot editor transport"
+                   style="display:flex;justify-content:center;align-items:center;gap:5px;flex-wrap:wrap;margin:7px 0">
+                <button id="ed-prev" type="button" title="Previous cut / selected shot (Up)">|◀</button>
+                <button id="ed-back" type="button" title="One frame backward (Left)">◀</button>
+                <button id="ed-stop" type="button" title="Stop preview (K or Space)">■</button>
+                <button id="ed-play" type="button" title="Play/pause preview (Space)" style="min-width:54px">▶</button>
+                <button id="ed-forward" type="button" title="One frame forward (Right)">▶</button>
+                <button id="ed-next" type="button" title="Next cut / selected shot (Down)">▶|</button>
+              </div>
               <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
                 <span id="ed-playhead" class="muted small">Shoot time: 00:00:00.000</span>
                 <button id="ed-mark-in" type="button">Mark In (I)</button>
@@ -268,8 +278,17 @@
           </div>
           <div class="panel" style="margin-top:10px;padding:10px">
             <h4>Selected Coverage / Rough-Cut Assembly</h4>
+            <div class="row" role="toolbar" aria-label="Simple timeline editing"
+                 style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:7px 0">
+              <button id="ed-split" type="button" title="Cut the chosen shot at the viewer playhead">✂ Split</button>
+              <button id="ed-lift" type="button" title="Remove selected shot but leave a blank gap">Lift</button>
+              <button id="ed-ripple" type="button" title="Remove selected shot and close the gap">Ripple Delete</button>
+              <button id="ed-close-gaps" type="button" title="Remove all deliberate blank-space entries from rough cut">Close Gaps</button>
+              <button id="ed-add-gap" type="button" title="Add one second of black space">+ 1s Gap</button>
+              <span id="ed-active-clip" class="muted small">Choose a rough-cut clip</span>
+            </div>
             <div id="ed-timeline" class="list" style="min-height:54px"></div>
-            <p class="muted small">Only shot choices and ranges are stored here. No destructive trimming, filters, grading, fades, rendering or high-quality media duplication.</p>
+            <p class="muted small">Compact rough-cut tools only. Split, lift and ripple edit the assembly plan—not the camera masters. No effects, grading, finishing renderer or media duplication. Professional finishing stays with the preferred external editor.</p>
           </div>
         </div>
       </div>
