@@ -81,9 +81,12 @@
            tags:["virtual","studio25d",pkg.id]
          });
        }
-       // A production opening is an explicit director action to select these sources.
-       await request("/api/switcher/cut/"+encode(sourceId(pkg.id,pkg.cameras[0].id)),"POST");
-       await request("/api/switcher/preview/"+encode(sourceId(pkg.id,pkg.cameras[1].id)),"POST");
+       // Activation selects BOTH sources in one canonical server transaction;
+       // a failed Preview may not leave Program silently on the new stage.
+       await request("/api/switcher/select","POST",{
+         program:sourceId(pkg.id,pkg.cameras[0].id),
+         preview:sourceId(pkg.id,pkg.cameras[1].id)
+       });
      } catch(e){return {shared:false,reason:"Could not register/select production cameras: "+e.message};}
      joined=true;last=null;
      try{await refresh();}
