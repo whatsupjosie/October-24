@@ -19,8 +19,16 @@
    if(!/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(session))throw Error("Invalid publisher session");
    if(typeof sourceId!=="function")throw Error("Studio camera source mapping required");
    if(!fetcher)throw Error("Fetch unavailable");
-   let stopped=false,acknowledged=0,errors=0;
+   let stopped=false,acknowledged=0,errors=0,cooldownUntil=0;
    const busySources=new Set(),lastAtBySource=new Map();
+   const schedule=options.setTimeout||globalThis.setTimeout?.bind(globalThis);
+   const cancel=options.clearTimeout||globalThis.clearTimeout?.bind(globalThis);
+   async function boundedFetch(url,init,limitMs){
+     if(typeof AbortController==="undefined"||!schedule)return fetcher(url,init);
+     const controller=new AbortController(),timer=schedule(()=>controller.abort(),limitMs);
+     try{return await fetcher(url,{...init,signal:controller.signal});}
+     finally{if(cancel)cancel(timer);}
+   }
    const size={width:640,height:360},minInterval=220;
    // Only constructed when a real browser canvas is available.
    const scratchBySource=new Map();
@@ -39,7 +47,7 @@
      });
    }
    async function publish(cameraId,canvas,now=Date.now()){
-     if(stopped||!cameraId||!canvas)return false;
+     if(stopped||!cameraId||!canvas||now<cooldownUntil)return false;
      const id=sourceId(cameraId);
      if(busySources.has(id)||now-(lastAtBySource.get(id)||0)<minInterval)return false;
      busySources.add(id);lastAtBySource.set(id,now);
@@ -47,25 +55,28 @@
        const blob=await toJpeg(canvas,id);
        if(stopped)return false;
        if(!blob||blob.size>240000)throw Error("Confidence frame exceeds 240KB budget");
-       const response=await fetcher("/api/studio25d/media/frames/"+encodeURIComponent(id),{
+       const response=await boundedFetch("/api/studio25d/media/frames/"+encodeURIComponent(id),{
          method:"POST",credentials:"same-origin",headers:{"Content-Type":"image/jpeg","X-Studio-Session":session},body:blob
-       });
+       },2000);
        if(!response.ok)throw Error("Confidence upload HTTP "+response.status);
        const result=await response.json();
        if(!result?.ok||result.source_id!==id||!Number.isInteger(result.sequence))throw Error("Video frame acknowledgment malformed");
-       acknowledged++;errors=0;onState({live:true,frames:acknowledged,source:id,sequence:result.sequence});
+       acknowledged++;errors=0;cooldownUntil=0;onState({live:true,frames:acknowledged,source:id,sequence:result.sequence});
        return true;
      }catch(e){
-       errors++;onError("Remote video confidence frame failed: "+e.message,errors);
+       if(stopped)return false;
+       errors++;
+       if(errors>=5)cooldownUntil=Date.now()+Math.min(20000,errors*1000);
+       onError("Remote video confidence frame failed: "+e.message,errors);
        return false;
      }finally{busySources.delete(id);}
    }
    async function stop(){
      if(stopped)return;stopped=true;onState({live:false,frames:acknowledged});
      try{
-       const response=await fetcher("/api/studio25d/media/sessions/"+encodeURIComponent(session),{
+       const response=await boundedFetch("/api/studio25d/media/sessions/"+encodeURIComponent(session),{
          method:"DELETE",credentials:"same-origin"
-       });
+       },1800);
        if(!response.ok)onError("Video publisher release HTTP "+response.status,errors);
      }catch(e){onError("Video publisher cleanup: "+e.message,errors);}
      for(const item of scratchBySource.values()){item.scratch.width=0;item.scratch.height=0;}
