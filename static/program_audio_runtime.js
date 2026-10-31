@@ -22,6 +22,8 @@
       this.options = Object.assign({ maxDistance: 18, duckMusicTo: 0.35 }, options);
       this.context = null;
       this.master = null;
+      this.masterVolume = 1;
+      this.captureDestination = null;
       this.buses = new Map();
       this.active = new Set();
       this.dialogueActive = 0;
@@ -60,7 +62,7 @@
         return;
       }
       if (event.action === 'mute' || event.action === 'unmute') return this.setMuted(event.bus, event.action === 'mute');
-      if (event.action === 'set_volume') return this.setBusVolume(event.bus, event.volume);
+      if (event.action === 'set_volume') return event.bus === 'master' ? this.setMasterVolume(event.volume) : this.setBusVolume(event.bus, event.volume);
       if (event.action === 'play') {
         if (!this.allowed(options)) return {blocked: true};
         if (event.url) return this.playUrl(event.url, options);
@@ -74,7 +76,7 @@
       if (!AudioContextCtor) throw new Error("Web Audio API unavailable");
       this.context = new AudioContextCtor();
       this.master = this.context.createGain();
-      this.master.gain.value = 1;
+      this.master.gain.value = this.masterVolume;
       this.master.connect(this.context.destination);
       for (const name of BUS_NAMES) this.createBus(name);
       return this.context;
@@ -90,6 +92,24 @@
       const bus = Object.assign({ name, gain, sources: new Set() }, DEFAULT_BUS);
       this.buses.set(name, bus);
       return bus;
+    }
+
+    setMasterVolume(volume) {
+      this.masterVolume = clamp(volume, 0, 1, 1);
+      this.ensureContext();
+      this.master.gain.value = this.masterVolume;
+      return this.masterVolume;
+    }
+
+    // Capture the SAME routed and mixed program buses used by the existing audio console.
+    // The microphone can be mixed by the recording surface; no parallel bus graph is created.
+    captureOutputStream() {
+      this.ensureContext();
+      if (!this.captureDestination) {
+        this.captureDestination = this.context.createMediaStreamDestination();
+        this.master.connect(this.captureDestination);
+      }
+      return this.captureDestination.stream;
     }
 
     setBusVolume(name, volume) {
@@ -226,6 +246,7 @@
         contextState: this.context?.state || "not_started",
         activeSources: this.active.size,
         dialogueActive: this.dialogueActive,
+        masterVolume: this.masterVolume,
         buses,
         lastError: this.lastError,
       };
