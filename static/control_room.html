@@ -125,6 +125,7 @@ body{
   </div>
 </div>
 <div id="stations-bar">
+  <button type="button" id="cameraBank" aria-label="Cycle camera source bank">CAM BANK 1</button>
   <button data-station="director">DIRECTOR</button>
   <button data-station="recorder">RECORDER</button>
   <button data-station="chyron">CHYRON</button>
@@ -147,12 +148,24 @@ const studioActions=window.PubCastStudioConsoleHotspots?new window.PubCastStudio
 let pgm='cam1',pvw='cam2',isRec=false,recStart=0,mode='auto',ws=null,activeRecordingSessionId='';
 let audioMuted=[false,false,false,false,false];
 let controlBlackout=false,lastPanic=0,lastBlackout=0;
+let cameraBank=0,cameraGroup="",activeSourceList=[],lastSwitcherSnapshot=null;
 function cam(id){return CAMS.find(c=>c.id===id)||null}
 async function syncSwitcherState(snapshot){
   if(!snapshot||!Array.isArray(snapshot.sources))throw Error("Canonical switcher state unavailable");
-  const sources=snapshot.sources.slice(0,5);
-  const mapped=sources.map((c,i)=>({id:"cam"+(i+1),n:String(i+1),l:c.name||c.id,sourceId:c.id}));
+  lastSwitcherSnapshot=snapshot;
+  const activeId=String(snapshot.program||snapshot.preview||"");
+  const prefix=activeId.startsWith("p25d_")&&activeId.lastIndexOf("_")>5
+    ?activeId.slice(0,activeId.lastIndexOf("_")+1):"";
+  if(prefix!==cameraGroup){cameraGroup=prefix;cameraBank=0;}
+  activeSourceList=prefix?snapshot.sources.filter(c=>String(c.id||"").startsWith(prefix)):snapshot.sources;
+  const totalBanks=Math.max(1,Math.ceil(activeSourceList.length/5));
+  cameraBank=Math.min(cameraBank,totalBanks-1);
+  const sources=activeSourceList.slice(cameraBank*5,cameraBank*5+5);
+  const mapped=sources.map((c,i)=>({id:"cam"+(i+1),n:String(cameraBank*5+i+1),
+    l:c.name||c.id,sourceId:c.id}));
   CAMS.splice(0,CAMS.length,...mapped);
+  const bankBtn=document.getElementById("cameraBank");
+  if(bankBtn)bankBtn.textContent="CAM BANK "+(cameraBank+1)+"/"+totalBanks;
   const program=CAMS.find(c=>c.sourceId===snapshot.program);
   const preview=CAMS.find(c=>c.sourceId===snapshot.preview);
   pgm=program?.id||"external";pvw=preview?.id||"external";
@@ -369,6 +382,12 @@ function handleWsEvent(m){
   }
 }
 function wsSend(d){if(ws&&ws.readyState===1)ws.send(JSON.stringify(d))}
+const bankBtn=document.getElementById("cameraBank");
+if(bankBtn)bankBtn.addEventListener("click",()=>{
+  const count=Math.max(1,Math.ceil(activeSourceList.length/5));
+  cameraBank=(cameraBank+1)%count;
+  if(lastSwitcherSnapshot)syncSwitcherState(lastSwitcherSnapshot);
+});
 updateUI();connectWS();
 </script>
 <script src="control_stations.js"></script>
