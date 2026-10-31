@@ -36,6 +36,10 @@ def create_program_audio_router(state: Optional[ProgramAudioState] = None, *, bl
         if not identity.get('authenticated'):
             raise HTTPException(401, 'Sign in to receive program audio commands')
         result = audio_state.events_after(after)
+        # An already-running studio's mix must be authoritative for newcomers;
+        # the event queue deliberately does not replay past audio on first entry.
+        if after < 0 or result.get('gap'):
+            result['status'] = audio_state.status()
         from .chat_rooms import role_can_access
         aliases = {'control': 'controlroom', 'waiting_room': 'waitingroom'}
         result['events'] = [event for event in result['events'] if not event.get('room') or
