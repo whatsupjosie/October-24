@@ -68,3 +68,30 @@ def test_one_audio_master_and_existing_bus_controls():
     assert state.status()["buses"]["music"]["volume"] == 0.2
     assert validate_audio_event({"action": "set_volume", "bus": "master", "volume": 5})["volume"] == 1.0
     with pytest.raises(ValueError): validate_audio_event({"action": "play", "bus": "master"})
+
+
+def test_stage_camera_pair_activation_is_checked_before_any_switch():
+    svc = SwitcherService(create_default_cameras())
+    before = svc.state()
+    assert svc.select("wide_shot", "missing_camera") is False
+    assert svc.state() == before
+    assert svc.select("close_up", "overhead") is True
+    assert svc.state()["program"] == "close_up"
+    assert svc.state()["preview"] == "overhead"
+
+
+def test_atomic_activation_route_is_authorized_and_rejects_partial_ids(monkeypatch):
+    monkeypatch.setenv("PUBCAST_ENFORCE_AUTH", "1")
+    app = FastAPI()
+    app.include_router(create_switcher_router(SwitcherService(create_default_cameras())))
+    with TestClient(app) as c:
+        endpoint = "/api/switcher/select"
+        pair = {"program": "wide_shot", "preview": "close_up"}
+        assert c.post(endpoint, json=pair).status_code in (401, 403)
+        assert c.post(endpoint, json=pair, headers=header("viewer")).status_code == 403
+        before = c.get("/api/switcher/state").json()
+        fail = c.post(endpoint, json={"program": "wide_shot", "preview": "nonexistent"}, headers=header())
+        assert fail.status_code == 404
+        assert c.get("/api/switcher/state").json() == before
+        response = c.post(endpoint, json=pair, headers=header())
+        assert response.status_code == 200 and response.json()["preview"] == "close_up"
