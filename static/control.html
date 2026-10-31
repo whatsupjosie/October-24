@@ -208,13 +208,20 @@
       <div id="station-editor" class="hidden">
         <div class="panel">
           <h3>Shoot Assembly — Rough Cut / Sync</h3>
+          <p class="muted small"><strong>Finishing:</strong> PubCast organizes and prepares; <a href="https://www.blackmagicdesign.com/products/davinciresolve" target="_blank" rel="noopener noreferrer">DaVinci Resolve Free</a> is our recommended professional finishing application (independent software; no partnership implied). Original recordings and full-resolution scene renders must be transferable, not trapped as previews. The free edition has format and resolution limits.</p>
           <p class="muted small">Organize camera and audio proxies, align with 15-second clacker markers, slip an individual track and save selects. This is not a finishing editor. Source files are never rewritten.</p>
           <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
             <input id="ed-project-title" placeholder="Shoot name" aria-label="Shoot name" style="min-width:150px" maxlength="128" />
             <button id="ed-new-project" type="button">New Shoot</button>
             <select id="ed-projects" aria-label="Open saved shoot"><option value="">Saved shoots…</option></select>
             <button id="ed-save" type="button">Save</button>
-            <button id="ed-export" type="button">Export Edit Plan (.json)</button>
+            <label class="muted small" for="ed-frame-rate">EDL frame rate
+              <select id="ed-frame-rate" aria-label="Edit decision list non-drop frame rate">
+                <option value="24">24</option><option value="25">25</option><option value="30">30</option>
+              </select>
+            </label>
+            <button id="ed-export" type="button">Export Handoff (.json)</button>
+            <button id="ed-edl-export" type="button">Export Cuts (.edl)</button>
           </div>
           <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
             <label class="muted small">Add or relink camera/audio proxies
@@ -222,6 +229,7 @@
             </label>
             <label class="muted small"><input id="ed-cache" type="checkbox" /> Keep small proxies locally for next session</label>
             <input id="ed-sidecar" type="file" accept=".json,application/json" aria-label="Load clacker sidecar" />
+            <button id="ed-original" type="button" title="Download the selected source exactly as imported; never transcode or upscale it">Export Selected Source Unchanged</button>
             <span id="ed-status" class="muted small" role="status" aria-live="polite">New or open a shoot to begin.</span>
           </div>
           <div class="grid two" style="gap:12px">
@@ -603,6 +611,7 @@
   <script src="/static/camera_station.js"></script>
   <script src="/static/conference.js"></script>
   <script src="/static/editor_sync_core.js"></script>
+  <script src="/static/editor_interchange.js"></script>
   <script src="/static/editor_sync_store.js"></script>
   <script src="/static/editor_sync_station.js"></script>
   <script src="/static/editor_ui.js"></script>
