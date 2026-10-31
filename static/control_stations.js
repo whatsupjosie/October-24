@@ -117,14 +117,73 @@ document.getElementById('vtr-load')?.addEventListener('click', async () => {
 document.getElementById('vtr-play')?.addEventListener('click', () => prodPatch({on_air:true}));
 document.getElementById('vtr-stop')?.addEventListener('click', () => prodPatch({on_air:false}));
 
-// ── Audio mixer ───────────────────────────────────────────────────────────────
-document.getElementById('mixer-apply')?.addEventListener('click', () => {
-  const pgm  = document.getElementById('mixer-program')?.value;
-  const host = document.getElementById('mixer-hosts')?.value;
-  const mus  = document.getElementById('mixer-music')?.value;
-  console.log(`Audio mix — PGM:${pgm} Hosts:${host} Music:${mus}`);
-  // Phase 2: POST to /api/audio/mix
-});
+// ── Shared program audio mixer ───────────────────────────────────────────────
+// The 2.5D television production and the walkable studio use ONE /api/program-audio
+// state and runtime. Never report a successful mix without successful HTTP responses.
+const MIXER_CONTROLS = {master:'mixer-program',dialogue:'mixer-hosts',music:'mixer-music'};
+function mixerFeedback(text, failed = false) {
+  const apply = document.getElementById('mixer-apply');
+  if (!apply) return;
+  let node = document.getElementById('mixer-feedback');
+  if (!node) {
+    node = document.createElement('output');
+    node.id = 'mixer-feedback';
+    node.style.cssText = 'display:block;margin-top:7px;font-size:12px';
+    apply.insertAdjacentElement('afterend', node);
+  }
+  node.textContent = text;
+  node.style.color = failed ? '#ff8080' : '#89d7a6';
+}
+async function readMixerState() {
+  const response = await fetch('/api/program-audio/status', {cache:'no-store'});
+  if (!response.ok) throw Error('Audio state HTTP ' + response.status);
+  const data = await response.json();
+  if (!data.ok || !data.status?.buses) throw Error('Audio state response missing buses');
+  return data.status;
+}
+async function loadMixerState() {
+  try {
+    const state = await readMixerState();
+    for (const [bus,id] of Object.entries(MIXER_CONTROLS)) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const value = bus === 'master' ? state.master_volume : state.buses[bus]?.volume;
+      if (Number.isFinite(Number(value))) el.value = Math.round(Number(value)*100);
+    }
+    mixerFeedback('Audio controls synchronized with shared program mixer');
+  } catch (error) { mixerFeedback('Audio mixer unavailable: ' + error.message,true); }
+}
+async function applyMixer() {
+  const btn = document.getElementById('mixer-apply');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  const failures = [];
+  try {
+    for (const [bus,id] of Object.entries(MIXER_CONTROLS)) {
+      const input = document.getElementById(id);
+      if (!input) continue;
+      const volume = Number(input.value) / 100;
+      if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+        failures.push(bus + ': invalid volume');
+        continue;
+      }
+      try {
+        const response = await fetch('/api/program-audio/event',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({action:'set_volume',bus,volume})
+        });
+        if (!response.ok) throw Error('HTTP ' + response.status);
+        const result = await response.json();
+        if (!result.ok || !result.status) throw Error('missing mixer confirmation');
+      } catch (error) { failures.push(bus + ': ' + error.message); }
+    }
+    if (failures.length) mixerFeedback('Audio update incomplete: '+failures.join('; '),true);
+    else mixerFeedback('Program, dialogue and music volumes applied to shared audio engine');
+  } finally { btn.disabled = false; }
+}
+document.getElementById('mixer-apply')?.addEventListener('click', () => applyMixer().catch(e => mixerFeedback(e.message,true)));
+document.querySelector('[data-station="mixer"]')?.addEventListener('click', () => {loadMixerState();});
+document.querySelector('[data-station="audio"]')?.addEventListener('click', () => {loadMixerState();});
 
 // ── Keyboard shortcuts (Space/C = Cut, F = Fade) ──────────────────────────────
 // Pages that load the shared key map (static/control_keys.js) get their keys from it, so this fixed set steps aside there.
