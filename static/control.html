@@ -204,42 +204,72 @@
         </div>
       </div>
 
-      <!-- Video Editor Station -->
+      <!-- Simple assembly editor — low-fi proxies and non-destructive EDL only. -->
       <div id="station-editor" class="hidden">
         <div class="panel">
-          <h3>Editor</h3>
+          <h3>Shoot Assembly — Rough Cut / Sync</h3>
+          <p class="muted small">Organize camera and audio proxies, align with 15-second clacker markers, slip an individual track and save selects. This is not a finishing editor. Source files are never rewritten.</p>
           <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;">
-            <input id="ed-search" class="pc-input" placeholder="Search media…" style="min-width:220px;" />
-            <label class="muted small" style="display:flex;align-items:center;gap:6px;">
-              <input id="ed-meta" type="checkbox" /> Metadata
-            </label>
-            <button id="ed-refresh" class="ghost">Refresh</button>
+            <input id="ed-project-title" placeholder="Shoot name" aria-label="Shoot name" style="min-width:150px" maxlength="128" />
+            <button id="ed-new-project" type="button">New Shoot</button>
+            <select id="ed-projects" aria-label="Open saved shoot"><option value="">Saved shoots…</option></select>
+            <button id="ed-save" type="button">Save</button>
+            <button id="ed-export" type="button">Export Edit Plan (.json)</button>
           </div>
-          <div class="grid two" style="gap:10px;">
+          <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;">
+            <label class="muted small">Add or relink camera/audio proxies
+              <input id="ed-import" type="file" accept="video/*,audio/*" multiple />
+            </label>
+            <label class="muted small"><input id="ed-cache" type="checkbox" /> Keep small proxies locally for next session</label>
+            <input id="ed-sidecar" type="file" accept=".json,application/json" aria-label="Load clacker sidecar" />
+            <span id="ed-status" class="muted small" role="status" aria-live="polite">New or open a shoot to begin.</span>
+          </div>
+          <div class="grid two" style="gap:12px">
             <div>
-              <h4>Bin</h4>
-              <div id="ed-bin" class="list" style="max-height:260px; overflow:auto;"></div>
+              <h4>Camera / Audio Bin</h4>
+              <div id="ed-bin" class="list" style="max-height:300px;overflow:auto"></div>
+              <p class="muted small">Select a track to preview. Right-click (or use Sync / Offset) to correct its timing. A +0.030-second offset advances that track by 30 ms.</p>
             </div>
             <div>
-              <h4>Viewer</h4>
-              <video id="ed-view" controls playsinline style="width:100%;background:#000;border-radius:6px;"></video>
-              <div class="row" style="gap:6px;align-items:center;">
-                <button id="ed-mark-in" class="ghost">Mark In (I)</button>
-                <button id="ed-mark-out" class="ghost">Mark Out (O)</button>
-                <button id="ed-add-subclip">Add To Timeline</button>
+              <h4>Aligned Proxy Viewer</h4>
+              <video id="ed-view" controls playsinline preload="metadata" style="width:100%;background:#000;border-radius:6px"></video>
+              <audio id="ed-audio" controls preload="metadata" style="width:100%;margin-top:4px"></audio>
+              <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap">
+                <span id="ed-playhead" class="muted small">Shoot time: 00:00:00.000</span>
+                <button id="ed-mark-in" type="button">Mark In (I)</button>
+                <button id="ed-mark-out" type="button">Mark Out (O)</button>
+                <button id="ed-add-subclip" type="button">Add Select</button>
                 <span id="ed-io" class="muted small">In: — Out: —</span>
               </div>
             </div>
           </div>
-          <div style="margin-top:10px;">
-            <h4>Timeline</h4>
-            <div id="ed-timeline" class="list" style="min-height:54px;"></div>
-            <div class="row" style="gap:6px;align-items:center;">
-              <label class="muted small">Output</label>
-              <input id="ed-export-name" placeholder="final_edit.mp4" style="min-width:220px;" />
-              <button id="ed-export">Export</button>
-              <span id="ed-status" class="muted small"></span>
+          <div class="panel" style="margin-top:10px;padding:10px">
+            <h4>Track Sync — Clacker is the Reference</h4>
+            <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+              <span id="ed-selected-track" class="muted small">Select a track</span>
+              <label class="muted small">Offset (seconds)
+                <input id="ed-offset" inputmode="decimal" value="0.000000" aria-label="Track timing offset in seconds" style="width:110px" />
+              </label>
+              <button id="ed-apply-offset" type="button">Apply</button>
+              <button id="ed-reset-offset" type="button">Reset Offset</button>
+              <label class="muted small">Clacker # (every 15 seconds)
+                <input id="ed-marker-number" type="number" min="0" step="1" value="0" style="width:75px" />
+              </label>
+              <button id="ed-mark-clacker" type="button">Mark Current Frame</button>
+              <span id="ed-sync-health" class="muted small">Unanchored</span>
             </div>
+            <div id="ed-sync-menu" hidden role="group" aria-label="Track synchronization quick adjustments" style="margin-top:8px;padding:8px;border:1px solid #888">
+              <strong>Track sync</strong>
+              <button type="button" id="ed-advance-30">Advance 0.030s</button>
+              <button type="button" id="ed-delay-30">Delay 0.030s</button>
+              <button type="button" id="ed-reset-menu">Reset</button>
+              <button type="button" id="ed-close-sync">Close</button>
+            </div>
+          </div>
+          <div class="panel" style="margin-top:10px;padding:10px">
+            <h4>Selected Coverage / Rough-Cut Assembly</h4>
+            <div id="ed-timeline" class="list" style="min-height:54px"></div>
+            <p class="muted small">Only shot choices and ranges are stored here. No destructive trimming, filters, grading, fades, rendering or high-quality media duplication.</p>
           </div>
         </div>
       </div>
@@ -553,6 +583,9 @@
   <script src="/static/control_switcher.js"></script>
   <script src="/static/camera_station.js"></script>
   <script src="/static/conference.js"></script>
+  <script src="/static/editor_sync_core.js"></script>
+  <script src="/static/editor_sync_store.js"></script>
+  <script src="/static/editor_sync_station.js"></script>
   <script src="/static/editor_ui.js"></script>
   <script src="/static/tts.js"></script>
   <script src="/static/bots.js"></script>
