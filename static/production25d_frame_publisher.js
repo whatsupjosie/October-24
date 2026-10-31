@@ -23,14 +23,19 @@
    const busySources=new Set(),lastAtBySource=new Map();
    const size={width:640,height:360},minInterval=220;
    // Only constructed when a real browser canvas is available.
-   let scratch=null,context=null;
-   function toJpeg(canvas) {
-     if(typeof options.encode==="function")return options.encode(canvas);
-     if(!scratch){scratch=document.createElement("canvas");scratch.width=size.width;scratch.height=size.height;context=scratch.getContext("2d",{alpha:false});}
-     if(!context||!canvas)throw Error("2.5D camera frame unavailable");
-     context.drawImage(canvas,0,0,size.width,size.height);
+   const scratchBySource=new Map();
+   function toJpeg(canvas,source) {
+     if(typeof options.encode==="function")return options.encode(canvas,source);
+     let item=scratchBySource.get(source);
+     if(!item){
+       const scratch=document.createElement("canvas");scratch.width=size.width;scratch.height=size.height;
+       item={scratch,context:scratch.getContext("2d",{alpha:false})};
+       scratchBySource.set(source,item);
+     }
+     if(!item.context||!canvas)throw Error("2.5D camera frame unavailable");
+     item.context.drawImage(canvas,0,0,size.width,size.height);
      return new Promise((resolve,reject)=>{
-       scratch.toBlob(blob=>blob&&blob.size?resolve(blob):reject(Error("JPEG confidence encoder returned no data")),"image/jpeg",.68);
+       item.scratch.toBlob(blob=>blob&&blob.size?resolve(blob):reject(Error("JPEG confidence encoder returned no data")),"image/jpeg",.68);
      });
    }
    async function publish(cameraId,canvas,now=Date.now()){
@@ -39,7 +44,7 @@
      if(busySources.has(id)||now-(lastAtBySource.get(id)||0)<minInterval)return false;
      busySources.add(id);lastAtBySource.set(id,now);
      try {
-       const blob=await toJpeg(canvas);
+       const blob=await toJpeg(canvas,id);
        if(stopped)return false;
        if(!blob||blob.size>240000)throw Error("Confidence frame exceeds 240KB budget");
        const response=await fetcher("/api/studio25d/media/frames/"+encodeURIComponent(id),{
@@ -63,7 +68,8 @@
        });
        if(!response.ok)onError("Video publisher release HTTP "+response.status,errors);
      }catch(e){onError("Video publisher cleanup: "+e.message,errors);}
-     if(scratch){scratch.width=0;scratch.height=0;scratch=null;context=null;}
+     for(const item of scratchBySource.values()){item.scratch.width=0;item.scratch.height=0;}
+     scratchBySource.clear();
    }
    return {publish,stop,status:()=>({stopped,busy:busySources.size>0,acknowledged,errors})};
  }
