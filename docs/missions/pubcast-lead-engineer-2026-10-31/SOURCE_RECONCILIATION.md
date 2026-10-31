@@ -113,3 +113,28 @@ and source. Thus the renamed vendor tree appears deliberate and consistent
 in the inspected entrypoints. Do **not** restore the old `static/vendor/three`
 directory merely to match old path names. Continue checking any remaining
 dynamic paths/imports in real browser/network tests before marking complete.
+
+## Executed recursive blob inventory — October 31 engineering run
+
+Compared the full, non-truncated Git trees of three donor repositories with source
+commit `73ca8bba3acad765c5388ce5b8e56fe37d093a82` (1,670 current blobs).
+The complete path, blob SHA, size and classification records are committed under
+`evidence/2026-10-31/inventory-*.jsonl`.
+
+| Donor | Source commit | Same path/bytes | Same path/different bytes | Other path/same bytes | Path and bytes absent |
+|---|---|---:|---:|---:|---:|
+| October | `1d9f48fb1c13f1ba84c7ad6b4a00c8804ae3529a` | 1,490 | 51 | 4 | 1 |
+| The-Prime | `ecf01ba0918acaefa6055d0a5cbe22135732e167` | 1 | 8 | 57 | 217 |
+| Wednesday- | `bad71e75121a00c0ca5590a883e968ad97483640` | 119 | 110 | 20 | 949 |
+
+The only October file absent both by path and blob identity is
+`static/vendor/three/build/three.module.min.js` (670,681 bytes). The active studio
+and walker use the versioned Three.js module tree and passed real browser loading.
+No older vendor distribution was imported merely to equalize paths.
+
+The-Prime contains archives, historical source, artwork and stock-looking image
+filenames whose provenance/rights are not established by a path inventory.
+Wednesday- includes many compiled caches and historical backup subtrees; its
+unique top-level `modules/care_profile.py` remains a candidate for semantic review.
+Neither absent-blob count means that many missing runtime features. No donor code
+or binary was bulk-promoted. Other repositories listed above still require review.

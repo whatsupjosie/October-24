@@ -68,3 +68,45 @@ P1: unusable camera/audio control, incorrect routing, authentication failure,
 P2: broken genre shot/animations/UI or editor handoff.
 P3: final surface/art and minor cosmetics.
 Fix highest-priority reproducible issues first while preserving all work.
+
+## October 31 executed update — source `73ca8bba3acad765c5388ce5b8e56fe37d093a82`
+
+The starting column above is historical. This update is scoped to Linux Chromium
+141/SwiftShader and the exact source tree recorded in `RUNTIME_REPORT.md`. Final
+whole-suite results are under `evidence/2026-10-31/README.md`.
+
+| Gate | Observed execution | Remaining boundary |
+|---|---|---|
+| G00 | VERIFIED IN EXECUTED ENVIRONMENT: dependency installation, real server startup/health and dependency consistency | Other operating systems/hardware |
+| G01 | Real owner setup, authenticated two-page camera control and denied anonymous CUT/media; lease/role negative tests | Every station/role and external media boundary still needs full acceptance |
+| G02 | VERIFIED IN EXECUTED ENVIRONMENT: all genres, no page errors, 1440×1000 and 390×844 layouts | Physical phone/browser diversity and performance |
+| G03 | Eight actual rendered packages with loaded GLB actors and distinct Program/Preview pixels; screenshots retained | Final set art and detailed creative/shot-quality review |
+| G04 | Actual Wave rig pixels, bundled walking bodies, repeated genre loading and walker teardown regressions pass | Full staging/occlusion/motion coverage on target devices |
+| G05 | Actual CUT across studio and Director pages plus canonical atomic-switch tests | Real-browser dissolve and all world/source combinations |
+| G06 | VERIFIED IN EXECUTED ENVIRONMENT: actual decoded remote frames and loss after source stop | Confidence transport remains deliberately low-rate |
+| G07 | NOT STARTED / OPEN: no production-rate encoded ingest implemented by this pass | Genuine transport and independent camera coverage |
+| G08 | Shared mixer state tested; PANIC silences a real measured signal through the browser mixer | Cross-client audio media and separate track recording |
+| G09 | Executed Node keyboard/editor invariants pass | Complete browser editor/live-focus interaction |
+| G10 | Storage station now reports measured space and honest cloud/backup state | Remaining stations require individual runtime acceptance |
+| G11 | Actual local MediaRecorder/IndexedDB, multiple takes, quota recovery and partial-error preservation | Server ingest/Blackbox capture and durable in-progress recording recovery |
+| G12 | VERIFIED IN EXECUTED ENVIRONMENT for browser Program: remote PANIC stops real recording, blacks pixels, zeros measured program output, preserves take and status | Physical devices, network partitions and other capture transports |
+| G13 | Local recording plays after reload; server metadata restores in a fresh service; interrupted captures identified | Full shoot master recovery across devices/processes |
+| G14 | OPEN: full Blackbox shoot media/performance integration absent | Marker/witness events alone do not pass |
+| G15 | OPEN: real synchronized blip/video path not implemented | Cross-source recording measurements |
+| G16 | Actual Node clacker/offset/EDL tests pass | Real editor playback and Resolve/import round trip |
+| G17 | Source remains present; no new claim of full browser editor acceptance | Full rough-cut workflow |
+| G18–G20 | OPEN: no asset-complete deterministic replay master or native selected 4K renderer | Source package and replay/render implementation |
+| G21 | Actual existing-recording source-byte export, hashes, collision-safe packaging, separate conversions and fresh-tree relink pass | Full multi-source shoot, independent audio, high-quality render elements and second physical machine |
+| G22 | Original media preservation improved; no actual Resolve run | Independent finishing import/relink |
+| G23 | Reproduced defects, adversarial failure injection and broad regression executed | Modest physical device profile and complete release audit |
+| G24 | Actual walker GLB/host tests and Counter integration regressions pass | Physical multi-client/device soak |
+| G25 | No owner input was needed to execute these repairs | Owner-only final assets/hardware/release decisions remain |
+| G26 | NOT REQUESTED / UNSEALED | Explicit owner acceptance after release gates |
+
+No partial row is promoted to complete merely because its tested subsection passed.
+
+Final isolated editor correction: source `4f6c5d3f48eb0b4d157f8947eaea1a51d7a8f610`.
+The whole run on the preceding implementation had 2,166 passes and one diagnostic
+UI race. After repairing it, all 14 affected browser tests and three file Node
+cases pass. The whole suite was not repeated once more; its saved failure remains
+in the evidence log. This does not change the open production release gates.
