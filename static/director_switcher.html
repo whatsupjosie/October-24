@@ -688,11 +688,13 @@ const cameras = [
   {id: "cam4", sourceId: "overhead", label: "Camera 4", shot: "Desk"},
   {id: "cam5", sourceId: "cam1_ndi", label: "Camera 5", shot: "Stage"}
 ];
+// One audio mixer shared by all studios. These are real server buses, NOT a
+// fabricated separation of individual speakers (host/guest/Pete routing is future work).
 const audio = [
-  {name: "Host", muted: false},
-  {name: "Guest", muted: false},
-  {name: "Pete", muted: false},
-  {name: "Music", muted: false}
+  {name:"Dialogue",bus:"dialogue",muted:false,volume:1,activeSources:0},
+  {name:"Music",bus:"music",muted:false,volume:1,activeSources:0},
+  {name:"Sound FX",bus:"sfx",muted:false,volume:1,activeSources:0},
+  {name:"VTR",bus:"vtr",muted:false,volume:1,activeSources:0}
 ];
 let program = "cam1";
 let preview = "cam3";
@@ -710,6 +712,8 @@ let backendTruth = {
   timeline: null,
   voxel: null,
   ai: null,
+  switcher: null,
+  programAudio: null,
   failures: []
 };
 
@@ -865,21 +869,46 @@ function renderButtons() {
 }
 
 function renderAudio() {
-  $("audioRows").innerHTML = "";
-  audio.forEach((channel, i) => {
-    const row = document.createElement("div");
-    row.className = "audio-row";
-    const value = 34 + ((i * 17) % 48);
-    row.innerHTML = `<span>${channel.name}</span><div class="meter"><span style="width:${value}%"></span></div><button class="switch" type="button" style="min-height:30px;padding:0" title="${channel.name} mute">M</button>`;
-    row.querySelector("button").onclick = (ev) => {
-      clickFlash(ev.currentTarget);
-      channel.muted = !channel.muted;
-      ev.currentTarget.classList.toggle("active-preview", channel.muted);
-      setTruthCard("truthAudio", channel.muted ? "warn" : "ok", channel.muted ? "Muted" : "Local", `${channel.name} mute ${channel.muted ? "on" : "off"}; no audio capture backend confirmed`);
-      log(channel.name + " mute toggled locally");
+  $("audioRows").replaceChildren();
+  const connected=!!backendTruth.programAudio?.ok;
+  audio.forEach(channel => {
+    const row=document.createElement("div");row.className="audio-row";
+    const label=document.createElement("span");label.textContent=channel.name;row.append(label);
+    // A gain percentage is not an audio level meter. Do not fake VU activity.
+    const detail=document.createElement("span");
+    detail.style.cssText="flex:1;font-size:11px;color:#c7b4a0";
+    detail.textContent=connected
+      ?("GAIN "+Math.round(channel.volume*100)+"% · "+(channel.muted?"MUTED":"ON")+" · "+channel.activeSources+" source(s); VU unavailable")
+      :"AUDIO STATUS UNAVAILABLE";
+    row.append(detail);
+    const btn=document.createElement("button");btn.className="switch";btn.type="button";btn.textContent=channel.muted?"UNMUTE":"MUTE";
+    btn.disabled=!connected;btn.title=channel.name+" mute through shared program audio";
+    btn.onclick=async ev=>{
+      btn.disabled=true;clickFlash(ev.currentTarget);
+      const result=await postJSON("/api/program-audio/event",{action:channel.muted?"unmute":"mute",bus:channel.bus});
+      if(result?.ok){await refreshAudioTruth();}
+      else {toast("AUDIO FAILED");log("Shared audio mute failed for "+channel.bus);}
+      btn.disabled=false;
     };
-    $("audioRows").appendChild(row);
+    row.append(btn);$("audioRows").append(row);
   });
+}
+async function refreshAudioTruth() {
+  const status=await getJSON("/api/program-audio/status");
+  backendTruth.programAudio=status;
+  if(status?.ok&&status.status?.buses){
+    for(const channel of audio){
+      const bus=status.status.buses[channel.bus];
+      if(!bus)continue;
+      channel.muted=!!bus.muted;
+      channel.volume=Number(bus.volume)||0;
+      channel.activeSources=Number(bus.active_sources)||0;
+    }
+    setTruthCard("truthAudio","ok","Shared",`Program master ${Math.round((status.status.master_volume??1)*100)}% · active bus state confirmed; VU measurement unavailable`);
+  }else{
+    setTruthCard("truthAudio","warn","Unavailable","Real audio mixer state could not be fetched");
+  }
+  renderAudio();
 }
 
 function updateMonitors() {
@@ -1147,10 +1176,7 @@ function tick() {
   const s = String(total % 60).padStart(2, "0");
   const f = String(Math.floor((elapsed % 1000) / 33)).padStart(2, "0");
   $("timecode").textContent = `${h}:${m}:${s}:${f}`;
-  document.querySelectorAll(".meter span").forEach((bar, i) => {
-    const w = 28 + Math.abs(Math.sin((elapsed / 600) + i)) * 58;
-    bar.style.width = w.toFixed(0) + "%";
-  });
+  // No synthetic meter animation. Real signal meters must use actual audio samples.
   requestAnimationFrame(tick);
 }
 
