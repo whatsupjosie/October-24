@@ -19,15 +19,30 @@ class SwitcherService:
         return {"program":getattr(p,"source_id",None),"preview":getattr(v,"source_id",None),
                 "transition":dict(self.transition),"sources":[{"id":c.source_id,"name":c.name,"transport":c.transport.value,"endpoint":c.endpoint} for c in self.cameras.list_sources()]}
     def preview(self,camera_id:str)->bool: return self.cameras.set_preview_source(camera_id)
-    def cut(self,camera_id:Optional[str]=None)->bool:
-        target=camera_id or (self.cameras.get_preview_source().source_id if self.cameras.get_preview_source() else None)
-        if not target: return False
-        ok=self.cameras.set_program_source(target)
-        if ok: self.director.manual_cut(target)
-        return ok
+    def cut(self,camera_id:Optional[str]=None, *, retain_transition:bool=False)->bool:
+        # A take without an explicit source is an actual Program/Preview exchange,
+        # not setting Program while leaving Preview stuck on the same camera.
+        if camera_id is None:
+            ok=self.cameras.take()
+            target=self.cameras.get_program_source().source_id if ok else None
+        else:
+            ok=self.cameras.set_program_source(camera_id)
+            target=camera_id if ok else None
+        if ok and target: self.director.manual_cut(target)
+        if ok and not retain_transition: self.transition={"type":"cut","duration_ms":0}
+        return bool(ok)
     def auto(self, camera_id:Optional[str]=None, *, transition:str="dissolve", duration_ms:int=350)->bool:
-        self.transition={"type":transition,"duration_ms":max(0,int(duration_ms))}
-        return self.cut(camera_id)
+        if transition not in {"cut","dissolve"}: raise ValueError("unsupported transition")
+        if not isinstance(duration_ms,int) or isinstance(duration_ms,bool) or not 0<=duration_ms<=4000:
+            raise ValueError("transition duration must be 0 to 4000 ms")
+        previous=dict(self.transition)
+        self.transition={"type":transition,"duration_ms":duration_ms}
+        try: ok=self.cut(camera_id,retain_transition=True)
+        except Exception:
+            self.transition=previous
+            raise
+        if not ok: self.transition=previous
+        return ok
 
 
 def _checked_pose(body:Dict[str,Any])->Dict[str,Any]:
@@ -51,22 +66,26 @@ def create_switcher_router(service:SwitcherService)->APIRouter:
     @r.get("/state")
     async def state(): return service.state()
     @r.post("/preview/{camera_id}")
-    async def preview(camera_id:str):
+    async def preview(camera_id:str, identity:Dict[str,Any]=Depends(require_role("mod"))):
         if not service.preview(camera_id): raise HTTPException(404,"camera not found")
         return service.state()
     @r.post("/cut")
-    async def cut_preview():
+    async def cut_preview(identity:Dict[str,Any]=Depends(require_role("mod"))):
         if not service.cut(): raise HTTPException(409,"no preview camera")
         return service.state()
     @r.post("/cut/{camera_id}")
-    async def cut(camera_id:str):
+    async def cut(camera_id:str, identity:Dict[str,Any]=Depends(require_role("mod"))):
         if not service.cut(camera_id): raise HTTPException(404,"camera not found")
         return service.state()
     @r.post("/transition")
-    async def transition(body:Dict[str,Any]):
+    async def transition(body:Dict[str,Any], identity:Dict[str,Any]=Depends(require_role("mod"))):
         camera_id=body.get("camera_id")
-        if not service.auto(camera_id,transition=str(body.get("type") or "dissolve"),duration_ms=int(body.get("duration_ms") or 350)):
-            raise HTTPException(404,"camera not found or preview unset")
+        raw_duration=body.get("duration_ms",350)
+        if isinstance(raw_duration,bool) or not isinstance(raw_duration,int): raise HTTPException(400,"duration_ms must be an integer")
+        try:
+            ok=service.auto(camera_id,transition=str(body.get("type") or "dissolve"),duration_ms=raw_duration)
+        except ValueError as exc: raise HTTPException(400,str(exc)) from None
+        if not ok: raise HTTPException(409,"camera not found or preview unset")
         return service.state()
     @r.post("/ptz/{camera_id}")
     async def ptz(camera_id:str,body:Dict[str,Any],identity:Dict[str,Any]=Depends(require_role("mod"))):
