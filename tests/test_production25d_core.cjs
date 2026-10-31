@@ -2,8 +2,8 @@
  * Dependency-free regression coverage of seven genre packages and session invariants. */
 const test=require("node:test"), assert=require("node:assert/strict");
 const C=require("../static/production25d_core.js");
-test("seven independently configured genre packages",()=>{
- assert.equal(Object.keys(C.PACKAGES).length,7);
+test("eight independently configured genre packages",()=>{
+ assert.equal(Object.keys(C.PACKAGES).length,8);
  const signatures=new Set();
  for(const [id,p] of Object.entries(C.PACKAGES)){
   assert.equal(C.validate(p),true);
@@ -15,7 +15,7 @@ test("seven independently configured genre packages",()=>{
   assert.ok(new Set(frames.map(f=>JSON.stringify(f))).size>=3,id+" lacks distinct real viewports");
   signatures.add(JSON.stringify([p.furnishings,p.performers.map(x=>x.slot),p.cameras.map(x=>x.center)]));
  }
- assert.equal(signatures.size,7,"genres must not be identical renamed packages");
+ assert.equal(signatures.size,8,"genres must not be identical renamed packages");
 });
 test("unknown shots are rejected",()=>assert.throws(()=>C.shot(C.PACKAGES.news,"invalid"),/Unknown shot/));
 test("invalid geometry and duplicate camera identifiers are rejected",()=>{
